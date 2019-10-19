@@ -48,7 +48,7 @@ class AdeftAnomalyDetector(object):
         pipeline = Pipeline([('tfidf',
                               TfidfVectorizer(stop_words=self.stop)),
                              ('oc_svm',
-                              OneClassSVM())])
+                              OneClassSVM(gamma='scale'))])
         splits = KFold(n_splits=cv, shuffle=True).split(pos_texts)
         X = pos_texts + neg_texts
         y = [1.0]*len(pos_texts) + [-1.0]*len(neg_texts)

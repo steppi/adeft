@@ -25,7 +25,7 @@ class AdeftAnomalyDetector(object):
         self.estimator = None
         self.best_score = None
         tokenize = TfidfVectorizer().tokenizer
-        tokens = tokenize(' '.join(synonyms.append(gene)))
+        tokens = tokenize(' '.join(synonyms + [gene])
         # Add gene symbol and its synonyms to list of stopwords
         self.stop = set(english_stopwords).union(tokens)
 

@@ -55,13 +55,13 @@ class AdeftAnomalyDetector(object):
         splits = ((train, np.concatenate((test,
                                          np.arange(len(pos_texts), len(X)))))
                   for train, test in splits)
-        f1_scorer = make_scorer(f1_score, pos_label=1.0,
+        f1_scorer = make_scorer(f1_score, pos_label=-1.0,
                                 average='binary')
         precision_scorer = make_scorer(precision_score,
-                                       pos_label=1.0,
+                                       pos_label=-1.0,
                                        average='binary')
         recall_scorer = make_scorer(recall_score,
-                                    pos_label=1.0,
+                                    pos_label=-1.0,
                                     average='binary')
         scorer = {'f1': f1_scorer, 'pr': precision_scorer,
                   'rc': recall_scorer}

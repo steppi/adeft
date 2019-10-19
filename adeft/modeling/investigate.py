@@ -5,8 +5,8 @@ import logging
 import numpy as np
 from sklearn.svm import OneClassSVM
 from sklearn.pipeline import Pipeline
-from sklearn.feature_extraction import TfidfVectorizer
 from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import f1_score, precision_score, recall_score, \
     make_scorer
 

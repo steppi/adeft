@@ -65,9 +65,9 @@ class AdeftAnomalyDetector(object):
                                     average='binary')
         scorer = {'f1': f1_scorer, 'pr': precision_scorer,
                   'rc': recall_scorer}
-        grid_search = GridSearchCV(pipeline, param_grid, n_jobs, cv=splits,
-                                   refit='f1', iid=False, scoring=scorer,
-                                   return_train_score=True)
+        grid_search = GridSearchCV(pipeline, param_grid, scoring=scorer,
+                                   n_jobs=n_jobs, cv=splits, refit='f1',
+                                   iid=False)
         grid_search.fit(X, y)
         logger.info('Best f1 score of %s found for' % grid_search.best_score_
                     + ' parameter values:\n%s' % grid_search.best_params_)

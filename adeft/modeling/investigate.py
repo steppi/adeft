@@ -3,6 +3,7 @@ import json
 import logging
 
 import numpy as np
+from numpy.random import choice
 from sklearn.svm import OneClassSVM
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import KFold, GridSearchCV
@@ -44,7 +45,11 @@ class AdeftAnomalyDetector(object):
         self.estimator = pipeline
         self.best_score = None
 
-    def cv(self, pos_texts, neg_texts, param_grid, n_jobs=1, cv=5):
+    def cv(self, pos_texts, neg_texts, param_grid,
+           k=None, n_jobs=1, cv=5):
+        m, n = len(pos_texts), len(neg_texts)
+        if k == None:
+            k = m // cv
         pipeline = Pipeline([('tfidf',
                               TfidfVectorizer(stop_words=self.stop)),
                              ('oc_svm',
@@ -53,7 +58,8 @@ class AdeftAnomalyDetector(object):
         X = pos_texts + neg_texts
         y = [1.0]*len(pos_texts) + [-1.0]*len(neg_texts)
         splits = ((train, np.concatenate((test,
-                                         np.arange(len(pos_texts), len(X)))))
+                                         choice(np.arange(m, m+n),
+                                                k, replace=False))))
                   for train, test in splits)
         f1_scorer = make_scorer(f1_score, pos_label=-1.0,
                                 average='binary')

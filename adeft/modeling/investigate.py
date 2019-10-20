@@ -9,7 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import KFold, GridSearchCV
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import f1_score, precision_score, recall_score, \
-    make_scorer
+    balanced_accuracy_score, make_scorer
 
 
 from adeft.nlp import english_stopwords
@@ -69,10 +69,11 @@ class AdeftAnomalyDetector(object):
         recall_scorer = make_scorer(recall_score,
                                     pos_label=-1.0,
                                     average='binary')
+        balanced_scorer = make_scorer(balanced_accuracy_score)
         scorer = {'f1': f1_scorer, 'pr': precision_scorer,
-                  'rc': recall_scorer}
+                  'rc': recall_scorer, 'ba': balanced_scorer}
         grid_search = GridSearchCV(pipeline, param_grid, scoring=scorer,
-                                   n_jobs=n_jobs, cv=splits, refit='f1',
+                                   n_jobs=n_jobs, cv=splits, refit='ba',
                                    iid=False)
         grid_search.fit(X, y)
         logger.info('Best f1 score of %s found for' % grid_search.best_score_

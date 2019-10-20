@@ -81,3 +81,7 @@ class AdeftAnomalyDetector(object):
         self.estimator = grid_search.best_estimator_
         self.best_score = grid_search.best_score_
         self.grid_search = grid_search
+
+    def predict(self, texts):
+        preds = self.estimator.predict(texts)
+        return np.where(preds == -1.0, 1.0, 0.0)

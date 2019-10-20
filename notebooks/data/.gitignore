@@ -3,3 +3,4 @@
 !.gitignore
 !example.txt
 !example_texts.json
+!example_training_data.json

@@ -61,7 +61,7 @@ class AdeftAnomalyDetector(object):
         scorer = {'sens': sensitivity_scorer, 'spec': specificity_scorer,
                   'sat': sat_spec_scorer}
         grid_search = GridSearchCV(pipeline, param_grid, scoring=scorer,
-                                   n_jobs=n_jobs, cv=splits, refit='sat',
+                                   n_jobs=n_jobs, cv=splits, refit=False,
                                    iid=False)
         grid_search.fit(X, y)
         logger.info('Best balanced accuracy score of %s found for'

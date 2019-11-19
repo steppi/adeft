@@ -92,11 +92,8 @@ class AdeftAnomalyDetector(object):
 
     def confidence_interval(self, texts, alpha=0.05):
         preds = self.predict(texts)
-        p_hat = sum(preds)/len(preds)
-        print(len(preds), int(sum(preds)))
         a, b = proportion_confint(sum(preds), len(preds), alpha=alpha,
                                   method='wilson')
-        print(a, b)
         left = max(0, (a - 1 + self.specificity)/self.best_score)
         right = min(1, (b - 1 + self.specificity)/self.best_score)
         return (left, right)

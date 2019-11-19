@@ -86,6 +86,17 @@ class AdeftAnomalyDetector(object):
         self.grid_search = grid_search
         self.train(pos_texts, **params)
 
+    def feature_importances(self):
+        if not self.estimator or not hasattr(self.estimator, 'named_steps') \
+           or not hasattr(self.estimator.named_steps['oc_svm'], 'coef_'):
+            raise RuntimeError('Classifier has not been fit')
+        tfidf = self.estimator.named_steps['tfidf']
+        classifier = self.estimator.named_steps['oc_svm']
+        feature_names = tfidf.get_feature_names()
+        coefficients = classifier.coef_.toarray().ravel()
+        return sorted(zip(feature_names, coefficients),
+                      key=lambda x: -x[1])
+
     def predict(self, texts):
         preds = self.estimator.predict(texts)
         return np.where(preds == -1.0, 1.0, 0.0)

@@ -239,7 +239,8 @@ class AdeftAnomalyDetector(object):
             sensitivity = self.sensitivity if self.sensitivity else 0.0
         # If classifier performs worse than coin flip, return largest possible
         # confidence interval
-        if sensitivity + specificity <= 1.0:
+        score = specificity + sensitivity - 1
+        if score <= 0.0:
             return (0, 1)
         preds = self.predict(texts)
         a, b = proportion_confint(sum(preds), len(preds), alpha=alpha,

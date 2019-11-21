@@ -16,12 +16,15 @@ logger = logging.getLogger(__file__)
 
 
 class AdeftAnomalyDetector(object):
-    def __init__(self, gene, synonyms):
-        self.gene = gene
-        self.synonyms = synonyms
-        self.stats = None
+    def __init__(self, blacklist=None):
+        self.blacklist = [] if blacklist is None else blacklist
         self.estimator = None
+        self.sensitivity = None
+        self.specificity = None
         self.best_score = None
+        self.best_params = None
+        self.cv_results = None
+
         tokenize = TfidfVectorizer().build_tokenizer()
         tokens = [token.lower() for token in
                   tokenize(' '.join(synonyms + [gene]))]

@@ -245,8 +245,8 @@ class AdeftAnomalyDetector(object):
         preds = self.predict(texts)
         a, b = proportion_confint(sum(preds), len(preds), alpha=alpha,
                                   method='jeffreys')
-        left = max(0, (a - 1 + self.specificity)/self.best_score)
-        right = min(1, (b - 1 + self.specificity)/self.best_score)
+        left = min(max(0, (a - 1 + specificity)/score), 1)
+        right = max(min(1, (b - 1 + specificity)/score), 0)
         return (left, right)
 
     def _get_info(self, cv_results):

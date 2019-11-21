@@ -16,6 +16,47 @@ logger = logging.getLogger(__file__)
 
 
 class AdeftAnomalyDetector(object):
+    """Trains one class classifier to detect samples unlike training texts
+
+    Fits a OneClassSVM with tfidf vectorized ngram features using sklearns
+    OneClassSVM and TfidfVectorizer classes. As its name implies,
+    the OneClassSVM takes data from only a single class. It attempts to
+    predict whether new datapoints come from the same distribution as the
+    training examples.
+
+    Parameters
+    ----------
+    blacklist : list of str
+        List of tokens to exclude as features.
+
+    Attributes
+    ----------
+    estimator : py:class:`sklearn.pipeline.Pipeline`
+        A fitted sklearn pipeline that transforms text data with a
+        TfidfVectorizer and applies a OneClassSVM. This attribute is None
+        if the anomaly detector has not been fitted
+    sensitivity : float
+        Crossvalidated sensitivity if fit with the cv method. This is the
+        proportion of anomalous examples in the test data that are predicted
+        to be anomalous.
+    specificity : float
+        Crossvalidated specificity if fit with the cv method. This is the
+        proportion of non-anomalos examples in the test data that are
+        predicted to not be anomalous. Sensitivity and specificity are used
+        to compute confidence intervals for the proportion of anomalous
+        examples in a set of texts.
+    best_score : float
+        The score used is sensitivity + specificity - 1. Crossvalidated value
+        of this score if fit with the cv method. The width of the confidence
+        interval for the proportion of anomalous examples in a set of texts
+        is inversely proportional to this score.
+    best_params : dict
+        Best parameters find in grid search if fit with the cv method
+    cv_results : dict
+        cv_results_ attribute of
+        py:class:`sklearn.model_selection.GridSearchCV` if fit with the
+        cv method
+    """
     def __init__(self, blacklist=None):
         self.blacklist = [] if blacklist is None else blacklist
         self.estimator = None
@@ -25,11 +66,14 @@ class AdeftAnomalyDetector(object):
         self.best_params = None
         self.cv_results = None
 
+        # Terms in the blacklist are tokenized and preprocessed just as in
+        # the underlying model and then added to the set of excluded stop words
         tokenize = TfidfVectorizer().build_tokenizer()
         tokens = [token.lower() for token in
-                  tokenize(' '.join(synonyms + [gene]))]
-        # Add gene symbol and its synonyms to list of stopwords
+                  tokenize(' '.join(blacklist))]
         self.stop = set(english_stopwords).union(tokens)
+        # Mappings to allow users to directly pass in parameter names
+        # for model instead of syntax to access them in an sklearn pipeline
         self.__param_mapping = {'nu': 'oc_svm__nu',
                                 'max_features': 'tfidf__max_features',
                                 'ngram_range': 'tfidf__ngram_range'}
@@ -38,6 +82,23 @@ class AdeftAnomalyDetector(object):
                                         self.__param_mapping.items()}
 
     def train(self, texts, nu=0.5, ngram_range=(1, 1), max_features=100):
+        """Fit estimator on a set of training texts
+
+        Parameters
+        ----------
+        texts : list of str
+            List of texts to use as training data
+        nu : Optional[float]
+            Upper bound on the fraction of allowed training errors
+            and lower bound on of the fraction of support vectors
+        ngram_range : Optional[tuple of int]
+            Range of ngram features to use. Must be a tuple of ints of the
+            form (a, b) with a <= b. When ngram_range is (1, 2), unigrams and
+            bigrams will be used as features. Default: (1, 1)
+        max_features : int
+            Maximum number of tfidf-vectorized ngrams to use as features in
+            model. Selects top_features by term frequency Default: 100
+        """
         # initialize pipeline
         pipeline = Pipeline([('tfidf',
                               TfidfVectorizer(ngram_range=ngram_range,
@@ -49,22 +110,47 @@ class AdeftAnomalyDetector(object):
         pipeline.fit(texts)
         self.estimator = pipeline
 
-    def cv(self, pos_texts, neg_texts, param_grid, n_jobs=1, cv=10):
+    def cv(self, texts, anomalous_texts, param_grid, n_jobs=1, cv=5):
+        """Performs grid search to select and fit a model
+
+        Parameters
+        ----------
+        texts : list of str
+            Training texts for OneClassSVM
+        anomalous_texts : list of str
+            Example anomalous texts for testing purposes. In practice, we
+            typically do not have access to such texts.
+        param_grid : Optional[dict]
+            Grid search parameters. Can contain all parameters from the
+            the train method.
+         n_jobs : Optional[int]
+            Number of jobs to use when performing grid_search
+            Default: 1
+        cv : Optional[int]
+            Number of folds to use in crossvalidation. Default: 5
+        """
         pipeline = Pipeline([('tfidf',
                               TfidfVectorizer(stop_words=self.stop)),
                              ('oc_svm',
                               OneClassSVM(kernel='linear'))])
-        pos_splits = KFold(n_splits=cv, shuffle=True).split(pos_texts)
-        neg_splits = KFold(n_splits=cv, shuffle=True).split(neg_texts)
-        X = pos_texts + neg_texts
-        y = [1.0]*len(pos_texts) + [-1.0]*len(neg_texts)
-        splits = ((train, np.concatenate((pos_test,
-                                          neg_test + len(pos_texts))))
-                  for (train, pos_test), (_, neg_test) in zip(pos_splits,
-                                                              neg_splits))
-        sensitivity_scorer = make_scorer(sensitivity_score, pos_label=-1.0)
-        specificity_scorer = make_scorer(specificity_score, pos_label=-1.0)
-        se_scorer = make_scorer(specificity_score, pos_label=-1.0)
+        # Create crossvalidation splits for both the training texts and
+        # the anomalous texts
+        train_splits = KFold(n_splits=cv, shuffle=True).split(texts)
+        anomalous_splits = KFold(n_splits=cv,
+                                 shuffle=True).split(anomalous_texts)
+        # Combine training texts and anomalous texts into a single dataset
+        # Give label -1.0 for anomalous texts, 1.0 otherwise
+        X = texts + anomalous_texts
+        y = [1.0]*len(texts) + [-1.0]*len(anomalous_texts)
+        # Generate splits where training folds only contain training texts,
+        # and test folds also contain both training and anomalous texts
+        splits = ((train, np.concatenate((test,
+                                          anom_test + len(texts))))
+                  for (train, test), (_, anom_test)
+                  in zip(train_splits, anomalous_splits))
+        sensitivity_scorer = make_scorer(_sensitivity_score, pos_label=-1.0)
+        specificity_scorer = make_scorer(_specificity_score, pos_label=-1.0)
+        se_scorer = make_scorer(_se_score, pos_label=-1.0)
         scorer = {'sens': sensitivity_scorer, 'spec': specificity_scorer,
                   'se': se_scorer}
 
@@ -86,10 +172,20 @@ class AdeftAnomalyDetector(object):
         self.specificity = specificity
         self.best_score = best_score
         self.best_params = params
-        self.grid_search = grid_search
-        self.train(pos_texts, **params)
+        self.cv_results = cv_results
+        self.train(texts, **params)
 
     def feature_importances(self):
+        """Return list of n-gram features along with their SVM coefficients
+
+        Returns
+        -------
+        list of tuple
+            List of tuples with first element an n-gram feature and second
+            element an SVM coefficient. Sorted by coefficient in decreasing
+            order. Since this is a one class svm, all coefficients are
+            positive.
+        """
         if not self.estimator or not hasattr(self.estimator, 'named_steps') \
            or not hasattr(self.estimator.named_steps['oc_svm'], 'coef_'):
             raise RuntimeError('Classifier has not been fit')
@@ -101,11 +197,42 @@ class AdeftAnomalyDetector(object):
                       key=lambda x: -x[1])
 
     def predict(self, texts):
+        """Return list of predictions for a list of texts
+
+        Parameters
+        ----------
+        texts : str
+
+        Returns
+        -------
+        list of float
+            Predicted labels for each text. 1.0 for anomalous, 0.0 otherwise
+        """
         preds = self.estimator.predict(texts)
         return np.where(preds == -1.0, 1.0, 0.0)
 
     def confidence_interval(self, texts, alpha=0.05,
                             specificity=None, sensitivity=None):
+        """Compute confidence interval for proportion of anomalous texts
+
+        This method appears in the paper Basic methods for sensitivity analysis
+        of biases by S. Greenland (1996).
+
+        Parameters
+        ----------
+        texts : list of str
+            Sample of texts
+        alpha : Optional[float]
+            Significance level. Default: 0.05
+        specificity : Optional[float]
+            Specificity of classifier at predicting anomalous examples.
+            If None, use the specificity value determined using the cv
+            method if it has been run.
+        sensitivity : Optional[float]
+            Sensitivity of classifier at predicting anomalous examples.
+            If None, use the sensitivity value determined using the cv
+            method if it has been run.
+        """
         if specificity is None:
             specificity = self.specificity if self.specificity else 0.0
         if sensitivity is None:
@@ -132,39 +259,49 @@ class AdeftAnomalyDetector(object):
         return sens, spec, params
 
 
-def true_positives(y_true, y_pred, pos_label=1):
+def _true_positives(y_true, y_pred, pos_label=1):
     return sum(1 if expected == pos_label and predicted == pos_label else 0
                for expected, predicted in zip(y_true, y_pred))
 
 
-def true_negatives(y_true, y_pred, pos_label=1):
+def _true_negatives(y_true, y_pred, pos_label=1):
     return sum(1 if expected == pos_label and predicted != pos_label else 0
                for expected, predicted in zip(y_true, y_pred))
 
 
-def false_positives(y_true, y_pred, pos_label=1):
+def _false_positives(y_true, y_pred, pos_label=1):
     return sum(1 if expected != pos_label and predicted == pos_label else 0
                for expected, predicted in zip(y_true, y_pred))
 
 
-def false_negatives(y_true, y_pred, pos_label=1):
+def _false_negatives(y_true, y_pred, pos_label=1):
     return sum(1 if expected == pos_label and predicted != pos_label else 0
                for expected, predicted in zip(y_true, y_pred))
 
 
-def sensitivity_score(y_true, y_pred, pos_label=1):
-    tp = true_positives(y_true, y_pred, pos_label)
-    fn = false_negatives(y_true, y_pred, pos_label)
-    return tp/(tp + fn)
+def _sensitivity_score(y_true, y_pred, pos_label=1):
+    tp = _true_positives(y_true, y_pred, pos_label)
+    fn = _false_negatives(y_true, y_pred, pos_label)
+    try:
+        result = tp/(tp + fn)
+    except ZeroDivisionError:
+        logger.warning('No positive examples in sample. Returning 0.0')
+        result = 0.0
+    return result
 
 
-def specificity_score(y_true, y_pred, pos_label=1):
-    tn = true_negatives(y_true, y_pred, pos_label)
-    fp = false_positives(y_true, y_pred, pos_label)
-    return tn/(tn + fp)
+def _specificity_score(y_true, y_pred, pos_label=1):
+    tn = _true_negatives(y_true, y_pred, pos_label)
+    fp = _false_positives(y_true, y_pred, pos_label)
+    try:
+        result = tn/(tn + fp)
+    except ZeroDivisionError:
+        logger.warning('No negative examples in sample. Returning 0.0')
+        result = 0.0
+    return result
 
 
-def se_score(y_true, y_pred, pos_label=1):
-    sens = sensitivity_score(y_true, y_pred, pos_label)
-    spec = specificity_score(y_true, y_pred, pos_label)
+def _se_score(y_true, y_pred, pos_label=1):
+    sens = _sensitivity_score(y_true, y_pred, pos_label)
+    spec = _specificity_score(y_true, y_pred, pos_label)
     return sens + spec - 1

@@ -104,7 +104,16 @@ class AdeftAnomalyDetector(object):
         preds = self.estimator.predict(texts)
         return np.where(preds == -1.0, 1.0, 0.0)
 
-    def confidence_interval(self, texts, alpha=0.05):
+    def confidence_interval(self, texts, alpha=0.05,
+                            specificity=None, sensitivity=None):
+        if specificity is None:
+            specificity = self.specificity if self.specificity else 0.0
+        if sensitivity is None:
+            sensitivity = self.sensitivity if self.sensitivity else 0.0
+        # If classifier performs worse than coin flip, return largest possible
+        # confidence interval
+        if sensitivity + specificity <= 1.0:
+            return (0, 1)
         preds = self.predict(texts)
         a, b = proportion_confint(sum(preds), len(preds), alpha=alpha,
                                   method='jeffreys')

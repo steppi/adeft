@@ -136,18 +136,25 @@ class AdeftAnomalyDetector(object):
         # Create crossvalidation splits for both the training texts and
         # the anomalous texts
         train_splits = KFold(n_splits=cv, shuffle=True).split(texts)
-        anomalous_splits = KFold(n_splits=cv,
-                                 shuffle=True).split(anomalous_texts)
-        # Combine training texts and anomalous texts into a single dataset
-        # Give label -1.0 for anomalous texts, 1.0 otherwise
-        X = texts + anomalous_texts
-        y = [1.0]*len(texts) + [-1.0]*len(anomalous_texts)
-        # Generate splits where training folds only contain training texts,
-        # and test folds also contain both training and anomalous texts
-        splits = ((train, np.concatenate((test,
-                                          anom_test + len(texts))))
-                  for (train, test), (_, anom_test)
-                  in zip(train_splits, anomalous_splits))
+        # Handle case where an insufficient amount of anomalous texts
+        # are provided. In this case only specificity can be estimated
+        if len(anomalous_texts) < cv:
+            X = texts
+            y = [1.0]*len(texts)
+            splits = train_splits
+        else:
+            anomalous_splits = KFold(n_splits=cv,
+                                     shuffle=True).split(anomalous_texts)
+            # Combine training texts and anomalous texts into a single dataset
+            # Give label -1.0 for anomalous texts, 1.0 otherwise
+            X = texts + anomalous_texts
+            y = [1.0]*len(texts) + [-1.0]*len(anomalous_texts)
+            # Generate splits where training folds only contain training texts,
+            # and test folds also contain both training and anomalous texts
+            splits = ((train, np.concatenate((test,
+                                              anom_test + len(texts))))
+                      for (train, test), (_, anom_test)
+                      in zip(train_splits, anomalous_splits))
         sensitivity_scorer = make_scorer(_sensitivity_score, pos_label=-1.0)
         specificity_scorer = make_scorer(_specificity_score, pos_label=-1.0)
         se_scorer = make_scorer(_se_score, pos_label=-1.0)
@@ -156,7 +163,6 @@ class AdeftAnomalyDetector(object):
 
         param_grid = {self.__param_mapping[key]: value
                       for key, value in param_grid.items()}
-
         grid_search = GridSearchCV(pipeline, param_grid, scoring=scorer,
                                    n_jobs=n_jobs, cv=splits, refit=False,
                                    iid=False)
@@ -266,7 +272,7 @@ def _true_positives(y_true, y_pred, pos_label=1):
 
 
 def _true_negatives(y_true, y_pred, pos_label=1):
-    return sum(1 if expected == pos_label and predicted != pos_label else 0
+    return sum(1 if expected != pos_label and predicted != pos_label else 0
                for expected, predicted in zip(y_true, y_pred))
 
 

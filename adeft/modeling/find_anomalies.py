@@ -5,14 +5,58 @@ from sklearn.svm import OneClassSVM
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
+
 from statsmodels.stats.proportion import proportion_confint
 
+from gensim.models import TfidfModel
+from gensim.corpora import Dictionary
+from gensim.matutils import corpus2csc
 
 from adeft.nlp import english_stopwords
 
-
 logger = logging.getLogger(__file__)
+
+
+class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
+    def __init__(self, dict_path, max_features=None):
+        self.dict_path = dict_path
+        self.max_features = max_features
+        self.tokenize = TfidfVectorizer().build_tokenizer()
+        self.model = None
+        self.dictionary = None
+
+    def fit(self, raw_documents, y=None):
+        background_dictionary = Dictionary.load(self.dict_path)
+        processed_texts = (self._preprocess(text) for text in raw_documents)
+        dictionary = Dictionary(processed_texts)
+        id_mapping = {key: background_dictionary.token2id[value]
+                      for key, value in dictionary.items()
+                      if value in background_dictionary.token2id}
+        dictionary.filter_tokens(good_ids=id_mapping.keys())
+        if self.max_features is not None:
+            dictionary.filter_extremes(no_below=1, no_above=1.0,
+                                       keep_n=self.max_features)
+        dictionary.num_docs = background_dictionary.num_docs
+        dictionary.dfs = {key: background_dictionary.dfs[value]
+                          for key, value in id_mapping.items()}
+        model = TfidfModel(dictionary=dictionary)
+        self.model = model
+        self.dictionary = dictionary
+        return self
+
+    def transform(self, raw_documents):
+        processed_texts = [self._preprocess(text) for text in raw_documents]
+        corpus = (self.dictionary.doc2bow(text) for text in processed_texts)
+        transformed_corpus = self.model[corpus]
+        return corpus2csc(transformed_corpus)
+
+    def get_feature_names():
+        pass
+
+    def _preprocess(self, text):
+        return [token.lower() for token in self.tokenize(text)]
 
 
 class AdeftAnomalyDetector(object):

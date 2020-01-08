@@ -31,10 +31,12 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
         background_dictionary = Dictionary.load(self.dict_path)
         processed_texts = (self._preprocess(text) for text in raw_documents)
         dictionary = Dictionary(processed_texts)
+        dictionary.filter_tokens(good_ids=(key for key, value
+                                           in dictionary.items()
+                                           if value
+                                           in background_dictionary.token2id))
         id_mapping = {key: background_dictionary.token2id[value]
-                      for key, value in dictionary.items()
-                      if value in background_dictionary.token2id}
-        dictionary.filter_tokens(good_ids=id_mapping.keys())
+                      for key, value in dictionary.items()}
         if self.max_features is not None:
             dictionary.filter_extremes(no_below=1, no_above=1.0,
                                        keep_n=self.max_features)

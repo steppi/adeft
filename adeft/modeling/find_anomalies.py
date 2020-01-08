@@ -20,10 +20,16 @@ logger = logging.getLogger(__file__)
 
 
 class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
-    def __init__(self, dict_path, max_features=None):
+    def __init__(self, dict_path, max_features=None, stopwords=None):
         self.dict_path = dict_path
         self.max_features = max_features
         self.tokenize = TfidfVectorizer().build_tokenizer()
+        if stopwords is None:
+            self.stopwords = []
+        elif stopwords == 'english':
+            self.stopwords = english_stopwords
+        else:
+            self.stopwords = stopwords
         self.model = None
         self.dictionary = None
 
@@ -35,11 +41,15 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
                                            in dictionary.items()
                                            if value
                                            in background_dictionary.token2id))
-        id_mapping = {key: background_dictionary.token2id[value]
-                      for key, value in dictionary.items()}
+        if self.stopwords:
+            stop_ids = [id_ for token, id_ in dictionary.token2id.items()
+                        if token in self.stopwords]
+            dictionary.filter_tokens(bad_ids=stop_ids)
         if self.max_features is not None:
             dictionary.filter_extremes(no_below=1, no_above=1.0,
                                        keep_n=self.max_features)
+        id_mapping = {key: background_dictionary.token2id[value]
+                      for key, value in dictionary.items()}
         dictionary.num_docs = background_dictionary.num_docs
         dictionary.dfs = {key: background_dictionary.dfs[value]
                           for key, value in id_mapping.items()}

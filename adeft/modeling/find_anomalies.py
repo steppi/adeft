@@ -34,25 +34,30 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
         self.dictionary = None
 
     def fit(self, raw_documents, y=None):
-        background_dictionary = Dictionary.load(self.dict_path)
+        # Load background dictionary trained on large corpus
+        dictionary = Dictionary.load(self.dict_path)
+        # Tokenize training texts and convert tokens to lower case
         processed_texts = (self._preprocess(text) for text in raw_documents)
-        dictionary = Dictionary(processed_texts)
+        local_dictionary = Dictionary(processed_texts)
+        local_dictionary.filter_tokens(good_ids=(key for key, value
+                                                 in local_dictionary.items()
+                                                 if value
+                                                 in dictionary.token2id))
+        # Remove stopwords
+        if self.stopwords:
+            stop_ids = [id_ for token, id_ in local_dictionary.token2id.items()
+                        if token in self.stopwords]
+            local_dictionary.filter_tokens(bad_ids=stop_ids)
+        # Keep only most frequent features
+        if self.max_features is not None:
+            local_dictionary.filter_extremes(no_below=1, no_above=1.0,
+                                             keep_n=self.max_features)
+        # Filter background dictionary to top features found in
+        # training dictionary
         dictionary.filter_tokens(good_ids=(key for key, value
                                            in dictionary.items()
                                            if value
-                                           in background_dictionary.token2id))
-        if self.stopwords:
-            stop_ids = [id_ for token, id_ in dictionary.token2id.items()
-                        if token in self.stopwords]
-            dictionary.filter_tokens(bad_ids=stop_ids)
-        if self.max_features is not None:
-            dictionary.filter_extremes(no_below=1, no_above=1.0,
-                                       keep_n=self.max_features)
-        id_mapping = {key: background_dictionary.token2id[value]
-                      for key, value in dictionary.items()}
-        dictionary.num_docs = background_dictionary.num_docs
-        dictionary.dfs = {key: background_dictionary.dfs[value]
-                          for key, value in id_mapping.items()}
+                                           in local_dictionary.token2id))
         model = TfidfModel(dictionary=dictionary)
         self.model = model
         self.dictionary = dictionary

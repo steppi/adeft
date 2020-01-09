@@ -65,7 +65,7 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
         processed_texts = [self._preprocess(text) for text in raw_documents]
         corpus = (self.dictionary.doc2bow(text) for text in processed_texts)
         transformed_corpus = self.model[corpus]
-        X = corpus2csc(transformed_corpus)
+        X = corpus2csc(transformed_corpus, num_terms=len(self.dictionary))
         return X.transpose()
 
     def get_feature_names(self):

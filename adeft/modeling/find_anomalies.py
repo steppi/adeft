@@ -20,16 +20,14 @@ logger = logging.getLogger(__file__)
 
 
 class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
-    def __init__(self, dict_path, max_features=None, stopwords=None):
+    def __init__(self, dict_path, max_features=None, stop_words=None):
         self.dict_path = dict_path
         self.max_features = max_features
         self.tokenize = TfidfVectorizer().build_tokenizer()
-        if stopwords is None:
-            self.stopwords = []
-        elif stopwords == 'english':
-            self.stopwords = english_stopwords
+        if stop_words is None:
+            self.stop_words = []
         else:
-            self.stopwords = stopwords
+            self.stop_words = stop_words
         self.model = None
         self.dictionary = None
 
@@ -44,9 +42,9 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
                                                  if value
                                                  in dictionary.token2id))
         # Remove stopwords
-        if self.stopwords:
+        if self.stop_words:
             stop_ids = [id_ for token, id_ in local_dictionary.token2id.items()
-                        if token in self.stopwords]
+                        if token in self.stop_words]
             local_dictionary.filter_tokens(bad_ids=stop_ids)
         # Keep only most frequent features
         if self.max_features is not None:
@@ -67,7 +65,8 @@ class AdeftTfidfVectorizer(BaseEstimator, TransformerMixin):
         processed_texts = [self._preprocess(text) for text in raw_documents]
         corpus = (self.dictionary.doc2bow(text) for text in processed_texts)
         transformed_corpus = self.model[corpus]
-        return corpus2csc(transformed_corpus)
+        X = corpus2csc(transformed_corpus)
+        return X.transpose()
 
     def get_feature_names(self):
         return [self.dictionary.id2token[i]
@@ -119,7 +118,8 @@ class AdeftAnomalyDetector(object):
         py:class:`sklearn.model_selection.GridSearchCV` if fit with the
         cv method
     """
-    def __init__(self, blacklist=None):
+    def __init__(self, tfidf_path, blacklist=None):
+        self.tfidf_path = tfidf_path
         self.blacklist = [] if blacklist is None else blacklist
         self.estimator = None
         self.sensitivity = None
@@ -137,13 +137,12 @@ class AdeftAnomalyDetector(object):
         # Mappings to allow users to directly pass in parameter names
         # for model instead of syntax to access them in an sklearn pipeline
         self.__param_mapping = {'nu': 'oc_svm__nu',
-                                'max_features': 'tfidf__max_features',
-                                'ngram_range': 'tfidf__ngram_range'}
+                                'max_features': 'tfidf__max_features'}
         self.__inverse_param_mapping = {value: key for
                                         key, value in
                                         self.__param_mapping.items()}
 
-    def train(self, texts, nu=0.5, ngram_range=(1, 1), max_features=100):
+    def train(self, texts, nu=0.5, ngram_range=(1, 1), max_features=1000):
         """Fit estimator on a set of training texts
 
         Parameters
@@ -153,19 +152,15 @@ class AdeftAnomalyDetector(object):
         nu : Optional[float]
             Upper bound on the fraction of allowed training errors
             and lower bound on of the fraction of support vectors
-        ngram_range : Optional[tuple of int]
-            Range of ngram features to use. Must be a tuple of ints of the
-            form (a, b) with a <= b. When ngram_range is (1, 2), unigrams and
-            bigrams will be used as features. Default: (1, 1)
         max_features : int
             Maximum number of tfidf-vectorized ngrams to use as features in
             model. Selects top_features by term frequency Default: 100
         """
         # initialize pipeline
         pipeline = Pipeline([('tfidf',
-                              TfidfVectorizer(ngram_range=ngram_range,
-                                              max_features=max_features,
-                                              stop_words=self.stop)),
+                              AdeftTfidfVectorizer(self.tfidf_path,
+                                                   max_features=max_features,
+                                                   stop_words=self.stop)),
                              ('oc_svm',
                               OneClassSVM(kernel='linear', nu=nu))])
 
@@ -192,7 +187,8 @@ class AdeftAnomalyDetector(object):
             Number of folds to use in crossvalidation. Default: 5
         """
         pipeline = Pipeline([('tfidf',
-                              TfidfVectorizer(stop_words=self.stop)),
+                              AdeftTfidfVectorizer(self.tfidf_path,
+                                                   stop_words=self.stop)),
                              ('oc_svm',
                               OneClassSVM(kernel='linear'))])
         # Create crossvalidation splits for both the training texts and

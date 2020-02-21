@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+
 from sklearn.svm import OneClassSVM
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import make_scorer
@@ -8,13 +9,12 @@ from sklearn.model_selection import KFold, GridSearchCV
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from statsmodels.stats.proportion import proportion_confint
-
 from gensim.models import TfidfModel
 from gensim.corpora import Dictionary
 from gensim.matutils import corpus2csc
 
 from adeft.nlp import english_stopwords
+from .stats import sensitivity_score, specificity_score, youdens_j_score
 
 logger = logging.getLogger(__file__)
 
@@ -213,9 +213,9 @@ class AdeftAnomalyDetector(object):
                                               anom_test + len(texts))))
                       for (train, test), (_, anom_test)
                       in zip(train_splits, anomalous_splits))
-        sensitivity_scorer = make_scorer(_sensitivity_score, pos_label=-1.0)
-        specificity_scorer = make_scorer(_specificity_score, pos_label=-1.0)
-        se_scorer = make_scorer(_se_score, pos_label=-1.0)
+        sensitivity_scorer = make_scorer(sensitivity_score, pos_label=-1.0)
+        specificity_scorer = make_scorer(specificity_score, pos_label=-1.0)
+        se_scorer = make_scorer(youdens_j_score, pos_label=-1.0)
         scorer = {'sens': sensitivity_scorer, 'spec': specificity_scorer,
                   'se': se_scorer}
 
@@ -275,44 +275,6 @@ class AdeftAnomalyDetector(object):
         preds = self.estimator.predict(texts)
         return np.where(preds == -1.0, 1.0, 0.0)
 
-    def confidence_interval(self, texts, alpha=0.05,
-                            specificity=None, sensitivity=None):
-        """Compute confidence interval for proportion of anomalous texts
-
-        This method appears in the paper Basic methods for sensitivity analysis
-        of biases by S. Greenland (1996).
-
-        Parameters
-        ----------
-        texts : list of str
-            Sample of texts
-        alpha : Optional[float]
-            Significance level. Default: 0.05
-        specificity : Optional[float]
-            Specificity of classifier at predicting anomalous examples.
-            If None, use the specificity value determined using the cv
-            method if it has been run.
-        sensitivity : Optional[float]
-            Sensitivity of classifier at predicting anomalous examples.
-            If None, use the sensitivity value determined using the cv
-            method if it has been run.
-        """
-        if specificity is None:
-            specificity = self.specificity if self.specificity else 0.0
-        if sensitivity is None:
-            sensitivity = self.sensitivity if self.sensitivity else 0.0
-        # If classifier performs worse than coin flip, return largest possible
-        # confidence interval
-        score = specificity + sensitivity - 1
-        if score <= 0.0:
-            return (0, 1)
-        preds = self.predict(texts)
-        a, b = proportion_confint(sum(preds), len(preds), alpha=alpha,
-                                  method='jeffreys')
-        left = min(max(0, (a - 1 + specificity)/score), 1)
-        right = max(min(1, (b - 1 + specificity)/score), 0)
-        return (left, right)
-
     def _get_info(self, cv_results):
         best_index = max(range(len(cv_results['mean_test_se'])),
                          key=lambda i: cv_results['mean_test_se'][i])
@@ -322,51 +284,3 @@ class AdeftAnomalyDetector(object):
         params = {self.__inverse_param_mapping[key]: value
                   for key, value in params.items()}
         return sens, spec, params
-
-
-def _true_positives(y_true, y_pred, pos_label=1):
-    return sum(1 if expected == pos_label and predicted == pos_label else 0
-               for expected, predicted in zip(y_true, y_pred))
-
-
-def _true_negatives(y_true, y_pred, pos_label=1):
-    return sum(1 if expected != pos_label and predicted != pos_label else 0
-               for expected, predicted in zip(y_true, y_pred))
-
-
-def _false_positives(y_true, y_pred, pos_label=1):
-    return sum(1 if expected != pos_label and predicted == pos_label else 0
-               for expected, predicted in zip(y_true, y_pred))
-
-
-def _false_negatives(y_true, y_pred, pos_label=1):
-    return sum(1 if expected == pos_label and predicted != pos_label else 0
-               for expected, predicted in zip(y_true, y_pred))
-
-
-def _sensitivity_score(y_true, y_pred, pos_label=1):
-    tp = _true_positives(y_true, y_pred, pos_label)
-    fn = _false_negatives(y_true, y_pred, pos_label)
-    try:
-        result = tp/(tp + fn)
-    except ZeroDivisionError:
-        logger.warning('No positive examples in sample. Returning 0.0')
-        result = 0.0
-    return result
-
-
-def _specificity_score(y_true, y_pred, pos_label=1):
-    tn = _true_negatives(y_true, y_pred, pos_label)
-    fp = _false_positives(y_true, y_pred, pos_label)
-    try:
-        result = tn/(tn + fp)
-    except ZeroDivisionError:
-        logger.warning('No negative examples in sample. Returning 0.0')
-        result = 0.0
-    return result
-
-
-def _se_score(y_true, y_pred, pos_label=1):
-    sens = _sensitivity_score(y_true, y_pred, pos_label)
-    spec = _specificity_score(y_true, y_pred, pos_label)
-    return sens + spec - 1

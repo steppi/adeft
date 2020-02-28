@@ -215,9 +215,9 @@ class AdeftAnomalyDetector(object):
                       in zip(train_splits, anomalous_splits))
         sensitivity_scorer = make_scorer(sensitivity_score, pos_label=-1.0)
         specificity_scorer = make_scorer(specificity_score, pos_label=-1.0)
-        se_scorer = make_scorer(youdens_j_score, pos_label=-1.0)
+        yj_scorer = make_scorer(youdens_j_score, pos_label=-1.0)
         scorer = {'sens': sensitivity_scorer, 'spec': specificity_scorer,
-                  'se': se_scorer}
+                  'yj': yj_scorer}
 
         param_grid = {self.__param_mapping[key]: value
                       for key, value in param_grid.items()}
@@ -226,7 +226,10 @@ class AdeftAnomalyDetector(object):
                                    iid=False)
         grid_search.fit(X, y)
         cv_results = grid_search.cv_results_
-        sensitivity, specificity, params = self._get_info(cv_results)
+        info = self._get_info(cv_results)
+        sensitivity, specificity = info['sens_mean'], info['spec_mean']
+        std_sensitivity, std_specificity = info['sens_std'], info['spec_std']
+        params = info['params']
         best_score = sensitivity + specificity - 1
         logger.info('Best score of %s found for'
                     ' parameter values:\n%s' % (best_score,
@@ -234,6 +237,8 @@ class AdeftAnomalyDetector(object):
 
         self.sensitivity = sensitivity
         self.specificity = specificity
+        self.std_sensitivity = std_sensitivity
+        self.std_specificity = std_specificity
         self.best_score = best_score
         self.best_params = params
         self.cv_results = cv_results
@@ -275,12 +280,19 @@ class AdeftAnomalyDetector(object):
         preds = self.estimator.predict(texts)
         return np.where(preds == -1.0, 1.0, 0.0)
 
+    def confidence_interval(self, texts):
+        pass
+
     def _get_info(self, cv_results):
-        best_index = max(range(len(cv_results['mean_test_se'])),
-                         key=lambda i: cv_results['mean_test_se'][i])
+        best_index = max(range(len(cv_results['mean_test_yj'])),
+                         key=lambda i: cv_results['mean_test_yj'][i])
         sens = cv_results['mean_test_sens'][best_index]
+        sens_std = cv_results['std_test_sens'][best_index]
         spec = cv_results['mean_test_spec'][best_index]
+        spec_std = cv_results['std_test_spec'][best_index]
         params = cv_results['params'][best_index]
         params = {self.__inverse_param_mapping[key]: value
                   for key, value in params.items()}
-        return sens, spec, params
+        return {'sens_mean': sens, 'sens_std': sens_std,
+                'spec_mean': spec, 'spec_std': spec_std,
+                'params': params}

@@ -5,7 +5,7 @@ import numpy as np
 import scipy as sp
 from scipy.stats import beta
 from scipy.optimize import brentq
-from scipy.special import loggama
+from scipy.special import loggamma
 
 
 logger = logging.getLogger(__file__)
@@ -65,12 +65,13 @@ def gamma_star(a):
     elif a > 1e9:
         output = 1.0
     else:
-        log_output = loggama(a) + a - 0.5*np.log(2*np.pi) - (a - 0.5)*np.log(a)
+        log_output = (loggamma(a) + a - 0.5*np.log(2*np.pi) -
+                      (a - 0.5)*np.log(a))
         output = np.exp(log_output)
     return output
 
 
-def D(self, p, q, x):
+def D(p, q, x):
     if x == 0 or x == 1:
         return 0.0
     part1 = np.sqrt(p*q/(2*np.pi * (p+q))) * \
@@ -82,7 +83,7 @@ def D(self, p, q, x):
     return (part1 * part2)
 
 
-def K(self, p, q, x, tol=1e-12):
+def K(p, q, x, tol=1e-12):
     def coefficient(n):
         m = n // 2
         if n % 2 == 0:
@@ -101,11 +102,11 @@ def K(self, p, q, x, tol=1e-12):
     return 1/C
 
 
-def betainc(self, p, q, x):
+def betainc(p, q, x):
     if x > p/(p+q):
-        return 1 - self._betainc(q, p, 1-x)
+        return 1 - betainc(q, p, 1-x)
     else:
-        return self._D(p, q, x)/p * self._K(p, q, x)
+        return D(p, q, x)/p * K(p, q, x)
 
 
 def prevalence_cdf(theta, n, t, sensitivity, specificity):
@@ -120,7 +121,7 @@ def prevalence_cdf(theta, n, t, sensitivity, specificity):
     return numerator/denominator
 
 
-def prevalence_credible_interval_exact(theta, n, t, sens, spec, alpha):
+def prevalence_credible_interval_exact(n, t, sens, spec, alpha):
     def f(theta):
         return prevalence_cdf(theta, n, t, sens, spec)
     left = brentq(lambda x: f(x) - alpha/2, 0, 1, xtol=1e-3, rtol=1e-3,
@@ -130,24 +131,35 @@ def prevalence_credible_interval_exact(theta, n, t, sens, spec, alpha):
     return (left, right)
 
 
-def prevalence_credible_interval(theta, n, t, sens_shape, sens_range,
-                                 spec_shape, spec_range, alpha, n_jobs=1,
-                                 num_samples=5000):
-    def sample_interval():
-        sp.random.seed()
-        return prevalence_credible_interval(n, t,
-                                            beta.rvs(sens_shape[0],
-                                                     sens_shape[1],
-                                                     sens_range[0],
-                                                     sens_range[1]),
-                                            beta.rvs(spec_shape[0],
-                                                     spec_shape[1],
-                                                     spec_range[0],
-                                                     spec_range[1]), alpha)
+def sample_interval(n, t, sens_shape, sens_range,
+                    spec_shape, spec_range, alpha):
+    sp.random.seed()
+
+    scale = sens_range[1] - sens_range[0]
+    loc = sens_range[0]
+    sens = beta.rvs(sens_shape[0], sens_shape[1], scale=scale, loc=loc)
+    scale = spec_range[1] - spec_range[0]
+    loc = spec_range[0]
+    spec = beta.rvs(spec_shape[0], spec_shape[1], scale=scale, loc=loc)
+    return prevalence_credible_interval_exact(n, t, sens, spec, alpha)
+
+
+def prevalence_credible_interval(n, t, sens_shape, sens_range,
+                                 spec_shape, spec_range, alpha,
+                                 num_samples=5000, n_jobs=1):
     if n_jobs > 1:
         with Pool(n_jobs) as pool:
-            future_results = [pool.apply_async(sample_interval)
+            future_results = [pool.apply_async(sample_interval,
+                                               args=(n, t, sens_shape,
+                                                     sens_range,
+                                                     spec_shape,
+                                                     spec_range,
+                                                     alpha))
                               for i in range(num_samples)]
             results = [interval.get() for interval in future_results]
-        return (np.mean([t[0] for t in results]),
-                np.mean([t[1] for t in results]))
+    else:
+        results = [sample_interval(n, t, sens_shape, sens_range,
+                                   spec_shape, spec_range, alpha)
+                   for i in range(num_samples)]
+    return (np.mean([t[0] for t in results]),
+            np.mean([t[1] for t in results]))

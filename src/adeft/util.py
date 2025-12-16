@@ -2,6 +2,7 @@
 
 """
 import re
+from typing import List
 from unicodedata import category
 
 from adeft.nlp import word_tokenize, word_detokenize
@@ -182,3 +183,8 @@ def str2filename(name: str) -> str:
         filesystems.
     """
     return ''.join(f'_{c.upper()}' if c.islower() else c for c in name)
+
+
+def get_model_name(shortforms: List[str]) -> str:
+    """Get the canonical name associated to model for given shortforms."""
+    return "&".join(sorted(str2filename(shortform) for shortform in shortforms))

@@ -186,5 +186,17 @@ def str2filename(name: str) -> str:
 
 
 def get_model_name(shortforms: List[str]) -> str:
-    """Get the canonical name associated to model for given shortforms."""
-    return "&".join(sorted(str2filename(shortform) for shortform in shortforms))
+    """Get the canonical name associated to model for given shortforms.
+
+    Parameters
+    ----------
+    shortforms : list[str]
+
+    Returns
+    -------
+    str
+        A canonical model name which can be used safely in file or directory
+        names on case insensitive filesystems.
+
+    """
+    return str2filename("&".join(sorted(shortforms)))

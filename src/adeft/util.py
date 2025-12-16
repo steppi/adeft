@@ -185,7 +185,7 @@ def str2filename(name: str) -> str:
     return ''.join(f'_{c.upper()}' if c.islower() else c for c in name)
 
 
-def get_model_name(shortforms: List[str]) -> str:
+def get_canonical_model_name(shortforms: List[str]) -> str:
     """Get the canonical name associated to model for given shortforms.
 
     Parameters

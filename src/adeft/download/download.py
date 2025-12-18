@@ -175,7 +175,7 @@ def get_s3_models():
         )
     except botocore.exceptions.ClientError:
         logger.warning("Online Adeft models not available.")
-        return
+        return {}
     return json.loads(response["Body"].read())
 
 

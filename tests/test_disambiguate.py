@@ -80,21 +80,22 @@ def test_disambiguate():
     ad = AdeftDisambiguator(test_model, grounding_dict, names)
     # case where there is a unique defining pattern
     disamb1 = ad.disambiguate(example1)
-    assert disamb1[0] == 'HGNC:6091'
-    assert disamb1[1] == 'INSR'
-    assert disamb1[2]['HGNC:6091'] == 1.0
-    assert disamb1[2]['MESH:D011839'] == 0.0
+    assert disamb1["decision"] == 'HGNC:6091'
+    assert disamb1["name"] == 'INSR'
+    assert disamb1["predicted_probs"]['HGNC:6091'] == 1.0
+    assert disamb1["predicted_probs"]['MESH:D011839'] == 0.0
+
 
     # case where there are conflicting defining patterns
     disamb2 = ad.disambiguate(example2)
-    preds = disamb2[2]
+    preds = disamb2["predicted_probs"]
     nonzero = {key for key, value in preds.items() if value > 0.0}
     assert nonzero == {'HGNC:6091', 'MESH:D007333'}
 
     # case without a defining pattern
     disamb3 = ad.disambiguate(example3)
-    assert disamb3[0] == 'HGNC:6091'
-    assert disamb3[1] == 'INSR'
+    assert disamb3["decision"] == 'HGNC:6091'
+    assert disamb3["name"] == 'INSR'
 
 
 def test_modify_groundings():

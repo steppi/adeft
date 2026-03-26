@@ -404,23 +404,31 @@ class AdeftDisambiguator(object):
         name_pad = max((len(val) for val in self.names.values()))
         count_pad = max(len(str(count)) for count
                         in label_distribution.values())
-        metric_pad = metric_digits + 2
-        header = '%s\t%s\t%s\n' % ('Grounding'.ljust(name_pad),
-                                   'Count'.ljust(count_pad),
-                                   'F1'.ljust(metric_pad))
+        metric_pad = metric_digits + 4
+        header = '%s\t%s\t%s\t%s\t%s\n' % ('Grounding'.ljust(name_pad),
+                                           'Count'.rjust(count_pad),
+                                           'F1'.rjust(metric_pad),
+                                           'Precision'.rjust(metric_pad),
+                                           'Recall'.rjust(metric_pad))
         output += header
         for grounding, count in sorted(label_distribution.items(),
                                        key=lambda x: - x[1]):
-            name = (self.names[grounding]
-                    if grounding in self.names else 'Ungrounded')
+            name = self.names.get(grounding, "Ungrounded")
             pos = '*' if grounding in self.pos_labels else ''
-            try:
-                f1 = round(model_stats[grounding]['f1']['mean'], metric_digits)
-            except KeyError:
-                f1 = ''
-            output += '%s%s\t%s\t%s\n' % (name.rjust(name_pad), pos,
-                                          str(count).rjust(count_pad),
-                                          str(f1).rjust(metric_pad))
+            name += pos
+            f1 = model_stats[grounding].get('f1')
+            pr = model_stats[grounding].get('pr')
+            rc = model_stats[grounding].get('rc')
+            f1 = str(round(f1["mean"], metric_digits)) if f1 is not None else ''
+            pr = str(round(pr["mean"], metric_digits)) if pr is not None else ''
+            rc = str(round(rc["mean"], metric_digits)) if rc is not None else ''
+            count = str(count)
+
+            output += '%s\t%s\t%s\t%s\t%s\n' % (name.ljust(name_pad),
+                                                  count.rjust(count_pad),
+                                                  f1.rjust(metric_pad),
+                                                  pr.rjust(metric_pad),
+                                                  rc.rjust(metric_pad))
         output += '\n'
         output += 'Global Metrics:\n'
         output += '-----------------\n'

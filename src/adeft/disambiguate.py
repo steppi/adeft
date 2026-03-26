@@ -124,7 +124,7 @@ class AdeftDisambiguator(object):
                 result[index] = {
                     "decision": disamb,
                     "name": self.names.get(disamb),
-                    "predicted_probabilities": pred,
+                    "predicted_probs": pred,
                     "defining_patterns": grounding,
                 }
             elif grounding:
@@ -142,7 +142,7 @@ class AdeftDisambiguator(object):
                 result[index] = {
                     "decision": str(disamb),
                     "name": self.names.get(disamb),
-                    "predicted_probabilities": pred,
+                    "predicted_probs": pred,
                     "defining_patterns": grounding,
                 }
                 pred_index += 1
@@ -155,7 +155,7 @@ class AdeftDisambiguator(object):
                 result[index] = {
                     "decision": disamb,
                     "name": self.names.get(disamb),
-                    "predicted_probabilities": pred,
+                    "predicted_probs": pred,
                     "defining_patterns": None,
                 }
                 pred_index += 1

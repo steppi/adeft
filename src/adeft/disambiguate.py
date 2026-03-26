@@ -6,6 +6,7 @@ import logging
 import numpy as np
 from collections import defaultdict
 from hashlib import md5
+from typing import NamedTuple
 
 
 from adeft.locations import ADEFT_MODELS_PATH
@@ -14,6 +15,13 @@ from adeft.modeling.classify import load_model
 from adeft.download import get_available_models
 
 logger = logging.getLogger(__file__)
+
+
+class DisambResult(NamedTuple):
+    decision: str
+    name: str
+    predicted_probs: dict[str, float]
+    defining_patterns: dict[str, list[str]]
 
 
 class AdeftDisambiguator(object):
@@ -78,9 +86,14 @@ class AdeftDisambiguator(object):
         -------
         result : tuple or list of tuple
             Disambiguations for text. For each text the corresponding
-            disambiguation is a tuple of three elements. A grounding,
-            a canonical name associated with the grounding, and a dictionary
-            containing predicted probabilities for each possible grounding
+            disambiguation is a named tuple of four elements. A grounding,
+            a canonical name associated with the grounding, a dictionary
+            containing predicted probabilities for each available grounding,
+            and a dictionary mapping groundings to longform expansions for
+            that grounding found based on defining patterns. Typically the
+            defining patterns dict contains only one entry, because it is
+            rare to have conflicting longform expansions.
+
         """
         # Handle case where a single string is passed
         if isinstance(texts, str):
@@ -121,12 +134,12 @@ class AdeftDisambiguator(object):
                 disamb, longforms = list(grounding.items())[0]
                 pred = {str(label): 0. for label in self.labels}
                 pred[str(disamb)] = 1.0
-                result[index] = {
-                    "decision": disamb,
-                    "name": self.names.get(disamb),
-                    "predicted_probs": pred,
-                    "defining_patterns": grounding,
-                }
+                result[index] = DisambResult(
+                    str(disamb),
+                    self.names.get(disamb),
+                    pred,
+                    grounding,
+                )
             elif grounding:
                 # if inconsistent defining patterns exist, disambiguate
                 # to the one with highest predicted probability. Set the
@@ -135,16 +148,16 @@ class AdeftDisambiguator(object):
                             if label in grounding else 0.
                             for label in self.labels}
                 norm_factor = sum(unnormed.values())
-                pred = {label: prob/norm_factor
+                pred = {label: float(prob/norm_factor)
                         for label, prob in unnormed.items()}
                 disamb = max(pred.keys(),
                              key=lambda key: pred[key])
-                result[index] = {
-                    "decision": str(disamb),
-                    "name": self.names.get(disamb),
-                    "predicted_probs": pred,
-                    "defining_patterns": grounding,
-                }
+                result[index] = DisambResult(
+                    str(disamb),
+                    self.names.get(disamb),
+                    pred,
+                    grounding,
+                )
                 pred_index += 1
             else:
                 # otherwise use the longform classifier directly
@@ -152,12 +165,12 @@ class AdeftDisambiguator(object):
                         for label, prob in preds[pred_index].items()}
                 disamb = max(pred.keys(),
                              key=lambda key: pred[key])
-                result[index] = {
-                    "decision": disamb,
-                    "name": self.names.get(disamb),
-                    "predicted_probs": pred,
-                    "defining_patterns": None,
-                }
+                result[index] = DisambResult(
+                    disamb,
+                    self.names.get(disamb),
+                    pred,
+                    {},
+                )
                 pred_index += 1
         return result
 

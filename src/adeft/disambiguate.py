@@ -4,6 +4,7 @@ import os
 import json
 import logging
 import numpy as np
+from collections import defaultdict
 from hashlib import md5
 
 
@@ -87,11 +88,19 @@ class AdeftDisambiguator(object):
         # First disambiguate based on searching for defining patterns
         groundings = []
         for text in texts:
-            grounding = set()
+            groundings_for_text = defaultdict(list)
+            seen_longforms = set()
             for recognizer in self.recognizers:
-                grounding.update({x['grounding']
-                                  for x in recognizer.recognize(text)})
-            groundings.append(grounding)
+                results = recognizer.recognize(text)
+                for info in results:
+                    if not info:
+                        continue
+                    grounding = info["grounding"]
+                    longform = info["longform_text"]
+                    if longform not in seen_longforms:
+                        groundings_for_text[grounding].append(longform)
+                        seen_longforms.add(longform)
+            groundings.append(dict(groundings_for_text))
         # For texts without a defining pattern or with inconsistent
         # defining patterns, use the longform classifier.
         undetermined = [text for text, grounding in zip(texts, groundings)
@@ -109,23 +118,33 @@ class AdeftDisambiguator(object):
                 # if an unambiguous defining pattern exists, use this
                 # as the disambiguation. set the probability of this
                 # grounding to one
-                disamb = grounding.pop()
-                pred = {label: 0. for label in self.labels}
-                pred[disamb] = 1.0
-                result[index] = (disamb, self.names.get(disamb), pred)
+                disamb, longforms = list(grounding.items())[0]
+                pred = {str(label): 0. for label in self.labels}
+                pred[str(disamb)] = 1.0
+                result[index] = {
+                    "decision": disamb,
+                    "name": self.names.get(disamb),
+                    "predicted_probabilities": pred,
+                    "defining_patterns": grounding,
+                }
             elif grounding:
                 # if inconsistent defining patterns exist, disambiguate
                 # to the one with highest predicted probability. Set the
                 # probability of the multiple groundings to sum to one
-                unnormed = {label: preds[pred_index][label] if
-                            label in grounding else 0.
+                unnormed = {str(label): preds[pred_index].get(label, 0.0)
+                            if label in grounding else 0.
                             for label in self.labels}
                 norm_factor = sum(unnormed.values())
                 pred = {label: prob/norm_factor
                         for label, prob in unnormed.items()}
                 disamb = max(pred.keys(),
                              key=lambda key: pred[key])
-                result[index] = (disamb, self.names.get(disamb), pred)
+                result[index] = {
+                    "decision": str(disamb),
+                    "name": self.names.get(disamb),
+                    "predicted_probabilities": pred,
+                    "defining_patterns": grounding,
+                }
                 pred_index += 1
             else:
                 # otherwise use the longform classifier directly
@@ -133,7 +152,12 @@ class AdeftDisambiguator(object):
                         for label, prob in preds[pred_index].items()}
                 disamb = max(pred.keys(),
                              key=lambda key: pred[key])
-                result[index] = (disamb, self.names.get(disamb), pred)
+                result[index] = {
+                    "decision": disamb,
+                    "name": self.names.get(disamb),
+                    "predicted_probabilities": pred,
+                    "defining_patterns": None,
+                }
                 pred_index += 1
         return result
 

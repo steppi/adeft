@@ -34,6 +34,5 @@ classifiers = [
 [project.optional-dependencies]
 test = [
      "pytest",
-     "pytest-cov",
-     "indra"
+     "pytest-cov"
 ]

@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: |
           pip install .[test]
+          # indra is used in one test for validating identifiers produced by
+          # the adeft models, but we don't need to pull in the dependencies.
+          pip install indra --no-deps
           python -m adeft.download
       - name: Test with pytest
         run:

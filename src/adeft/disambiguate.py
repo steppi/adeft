@@ -148,7 +148,7 @@ class AdeftDisambiguator(object):
                 pred_index += 1
             else:
                 # otherwise use the longform classifier directly
-                pred = {label: prob
+                pred = {str(label): prob
                         for label, prob in preds[pred_index].items()}
                 disamb = max(pred.keys(),
                              key=lambda key: pred[key])

@@ -71,14 +71,14 @@ class BaselineLogisticRegressionModel(BaseModel):
         'max_features': 'tfidf',
         'stop_words': 'tfidf',
         'C': 'logit',
-        'penalty': 'logit',
+        'l1_ratio': 'logit',
         'class_weight': 'logit',
         'random_state': 'logit',
         }
-    def __init__(self, *, stop_words=None, ngram_range=(1, 2), C=100.0, penalty='l1',
+    def __init__(self, *, stop_words=None, ngram_range=(1, 2), C=100.0, l1_ratio=1.0,
                  max_features=1000, class_weight=None, random_state=None):
         self.C = C
-        self.penalty = penalty
+        self.l1_ratio = l1_ratio
         self.class_weight = class_weight
         self.ngram_range = ngram_range
         self.max_features = max_features
@@ -91,7 +91,7 @@ class BaselineLogisticRegressionModel(BaseModel):
                                   ('logit',
                                    LogisticRegression(C=C,
                                                       solver='saga',
-                                                      penalty=penalty,
+                                                      l1_ratio = 1.0,
                                                       random_state=random_state,
                                                       max_iter=1000))])
         self._feature_stds = None
@@ -193,7 +193,7 @@ class BaselineLogisticRegressionModel(BaseModel):
                 "intercept_": intercept_,
                 "coef_": coef_,
                 "C": self.C,
-                "penalty": self.penalty,
+                "l1_ratio": self.l1_ratio,
                 "class_weight": self.class_weight,
 
             },
@@ -218,7 +218,7 @@ class BaselineLogisticRegressionModel(BaseModel):
         tfidf.idf_ = np.asarray(model_info["tfidf"]["idf_"])
         logit = LogisticRegression(
             C=model_info["logit"].get("C", 1.0),
-            penalty=model_info["logit"].get("penalty", "l2"),
+            l1_ratio=model_info["logit"].get("l1_ratio", 1.0),
             class_weight=model_info["logit"].get("class_weight"),
         )
 
@@ -230,7 +230,7 @@ class BaselineLogisticRegressionModel(BaseModel):
             stop_words=tfidf.stop_words,
             ngram_range=tfidf.ngram_range,
             C=logit.C,
-            penalty=logit.penalty,
+            l1_ratio=logit.l1_ratio,
             max_features=tfidf.max_features,
             class_weight=logit.class_weight,
         )

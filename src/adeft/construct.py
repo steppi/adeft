@@ -8,11 +8,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import NamedTuple
 
-
 from adeft.discover import AdeftMiner
 from adeft.locations import ADEFT_PATH
 from adeft.modeling.classify import AdeftClassifier
 from adeft.modeling.label import AdeftLabeler
+from adeft.nlp import english_stopwords
 
 
 class AdeftData(NamedTuple):
@@ -197,7 +197,7 @@ class AdeftConstructor:
         pos_labels = [label for label in names if self.is_pos_label(label)]
         return names, pos_labels
 
-    def __call__(shortforms):
+    def get_adeft_data(shortforms):
         """Generate candidate grounding info for an adeft model for shortforms.
 
         Parameters
@@ -246,17 +246,18 @@ class AdeftConstructor:
             total_count = sum(grounding_counts.values())
             top_grounding, top_count = max(grounding_counts.items(), key=lambda x: x[1])
             if top_count / total_count < 0.5:
-                local_groundings = {
+                in_cluster_groundings = {
                 longform: f"AMBIGUOUS-{i}-{grounding}"
                     for longform, grounding in zip(longforms, groundings)
                 }
             else:
-                local_groundings = {
+                in_cluster_groundings = {
                     longform: grounding
+                    if grounding == "top_grounding"
+                    else f"DISCORDANT-{i}-{grounding}"
                     for longform, grounding in zip(longforms, groundings)
-                    if grounding == top_grounding
                 }
-            temp_groundings.update(local_groundings)
+            temp_groundings.update(in_cluster_groundings)
 
         new_grounding_dict = {
             shortform: {longform: temp_groundings[longform]
@@ -356,6 +357,74 @@ class GroundingClusterer:
             for component in nx.connected_components(G)
         ]
 
+
+class DistantEvalCorpusConstructor:
+    def __init__(
+            self,
+            get_content_ids_for_gene_or_protein,
+            get_content_ids_for_mesh_term,
+            get_mesh_terms_for_grounding,
+            get_plaintexts_for_content_ids,
+            *,
+            filter_func=None,
+    ):
+        """Callable to build corpora for training a distant evaluation models.
+
+
+        get_content_ids_for_gene_or_protein : callable[str, list[str]]
+            A function mapping groundings from HGNC or UP namespace to a list of
+            content ids for 
+        """
+        self.get_content_ids_for_gene_or_protein = get_entrez_pmids_for_gene_or_protein
+        self.get_content_ids_for_mesh_term = get_pmids_for_mesh_term
+        self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
+        self.get_plaintexts_for_content_ids = get_plaintext_for_content_ids
+
+    def __call__(grounding, *, exclude_content_ids=None):
+        if exclude_content_ids is None:
+            exclude_content_ids = set()
+        exclude_content_ids = set(exclude_content_ids)
+
+        entrez_ids = set()
+        mesh_ids = set()
+        mesh_terms = None
+        namespace, identifier = grounding.split(":", maxsplit=1)
+        if namespace in ["HGNC", "UP"]:
+            entrez_ids.update(self.get_content_ids_for_gene_or_protein(grounding))
+
+        if namespace == 'MESH':
+            mesh_terms = [identifier]
+        else:
+            mesh_terms = self.get_mesh_terms_for_grounding(grounding)
+
+        if mesh_terms:
+            for mesh_id in mesh_terms:
+                mesh_ids.update(
+                    self.get_content_ids_for_mesh_term(mesh_id)
+                )
+        mesh_ids = mesh_ids - entrez_ids - exclude_content_ids
+        entrez_ids -= exclude_content_ids
+        all_ids = list(mesh_ids | entrez_ids)
+        if not all_ids:
+            return None
+        train_data = self.get_plaintexts_for_content_ids(
+            all_ids, text_types=['fulltext', 'abstract']
+        )
+        train_data = [
+            (id_, text) for id_, text in train_data.items()
+            if self.filter_func(text)
+        ]
+        if len(train_data) < 5:
+            return None
+        train_ids, train_texts = zip(*train_data)
+        train_data = None
+        return {
+            "mesh_terms": mesh_terms,
+            "num_entrez": len(entrez_ids),
+            "num_mesh": len(mesh_ids),
+            "train_ids": train_ids,
+            "train_data": train_data,
+        }
 
 
 def get_existing_grounding_info(shortform, *, path=ADEFT_PATH):
@@ -457,3 +526,131 @@ def validate_and_refit_model(
         return None
     model.cv(X, y, param_grid=param_grid, n_jobs=n_jobs, cv=cv)
     return model
+
+
+class AdeftTrainer:
+    def __init__(self, adeft_constructor, disteval_constructor):
+        """Class for training adeft models and evaluating them with opaque.
+
+        Parameters
+        ----------
+        adeft_constructor : `AdeftConstructor`
+        disteval_constructor : `DistantEvalCorpusConstructor`
+
+        """
+        self.adeft_constructor = adeft_constructor
+        self.opaque_constructor = opaque_constructor
+
+    def __call__(self, adeft_data, *, rng=None):
+        """Train an adeft model and perform direct and distant evaluation
+
+        Paramters
+        ---------
+        adeft_data : `AdeftData`
+            ``NamedTuple`` with entries ``grounding_dict``, ``names``, and
+            ``pos_labels``.
+
+        Returns
+        -------
+        dict
+
+        """
+        from opaque.train import train_anomaly_detector
+        from opaque.nlp.models import GroundingAnomalyDetector
+        from opaque.stats import sample_estimated_metrics
+        from opaque.stats.stats import _hdi_from_sample
+            
+        grounding_dict, names, pos_labels = adeft_data
+        corpus = constructor.build_corpus(grounding_dict)
+        adeft_model = validate_and_refit_model(
+            shortforms, corpus, pos_labels, random_state=rng, min_class_size=10
+        )
+        if adeft_model is None:
+            raise RuntimeError(f"Insufficient data to train model for {shortforms}")
+        disamb = AdeftDisambiguator(adeft_model, grounding_dict, names)
+        ad_models = {}
+        groundings = [grounding for _, grounding_map in grounding_dict.items()
+                      for grounding in grounding_map.values()]
+        for grounding in groundings:
+            if grounding == "ungrounded":
+                continue
+            cases = opaque_constructor.get_training_cases_for_grounding(grounding)
+            if cases is None:
+                ad_models[grounding] = None
+                continue
+            texts = cases["train_texts"]
+            if len(texts) < 5:
+                ad_models[grounding] = None
+                continue
+            ad_model_info = train_anomaly_detector(
+                shortforms,
+                texts,
+                [0.2, 0.4],
+                [20, 50],
+                random_state=rng,
+                num_mesh_texts=cases["num_mesh"],
+                num_entrez_texts=cases["num_entrez"],
+                predict_shape_params=True,
+                stop_words=english_stopwords + ["http"],
+            )
+            ad_models[grounding] = ad_model_info
+            cases = None
+        ids = set()
+        for shortform in shortforms:
+            ids.update(constructor.get_content_ids_for_agent_text(shortform))
+        ids = list(ids)
+        texts = list(
+            constructor.get_plaintexts_for_content_ids(trids, contains=shortforms)
+        )
+        disambiguations = disamb.disambiguate(texts)
+
+        dp_idx_dict = defaultdict(list)
+        no_dp_idx_dict = defaultdict(list)
+        for i, res in enumerate(disambiguations):
+            grounding = res["decision"]
+            defining_patterns = res["defining_patterns"]
+            from_defining_pattern = (
+                defining_patterns is not None and len(defining_patterns) == 1
+            )
+            if from_defining_pattern:
+                dp_idx_dict[grounding].append(i)
+            else:
+                no_dp_idx_dict[grounding].append(i)
+        intervals = {}
+        frequencies = {}
+        for grounding, model_info in ad_models.items():
+            if model_info is None:
+                intervals[grounding] = None
+                frequencies[grounding] = None
+                continue
+            shape_params = model_info["shape_params"]
+            sens_a, sens_b = shape_params["sens_alpha"], shape_params["sens_beta"]
+            spec_a, spec_b = shape_params["spec_alpha"], shape_params["spec_beta"]
+            model = GroundingAnomalyDetector.load_model_info(model_info["model"])
+            idx = no_dp_idx_dict[grounding]
+            with_dp_idx = dp_idx_dict[grounding]
+            preds = model.predict([texts[i] for i in idx])
+            mask = np.ones(len(texts), dtype=bool)
+            mask[idx] = False
+            mask[with_dp_idx] = False
+            out_preds = model.predict([texts[i] for i, cond in enumerate(mask) if cond])
+            n = len(preds)
+            t = np.sum(preds == -1.0)
+            m = len(out_preds)
+            u = np.sum(out_preds == -1.0)
+            frequencies[grounding] = [n, int(t), m, int(u)]
+            metrics = sample_estimated_metrics(
+                n, t, m, u, sens_a, sens_b, spec_a, spec_b, n_samples=10000, rng=1729
+            )
+            met = metrics["standard"]
+            precision_interval = _hdi_from_sample(met.precision, alpha=0.9)
+            recall_interval = _hdi_from_sample(met.recall, alpha=0.9)
+            intervals[grounding] = {"precision": precision_interval, "recall": recall_interval}
+        return {
+            "intervals": intervals,
+            "ad_models": ad_models,
+            "frequencies": frequencies,
+            "grounding_dict": grounding_dict,
+            "names": names,
+            "adeft_model": adeft_model.get_model_info(),
+        }

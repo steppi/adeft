@@ -15,7 +15,7 @@ from adeft.modeling.label import AdeftLabeler
 from adeft.nlp import english_stopwords
 
 
-class AdeftData(NamedTuple):
+class GroundingInfo(NamedTuple):
     grounding_dict: dict[str, dict[str, str]]
     names: dict[str, str]
     pos_labels: list[str]
@@ -126,7 +126,7 @@ class AdeftConstructor:
 
         Returns
         -------
-        AdeftData
+        `GroundingInfo`
             A named tuple containing the following entries
             grounding_dict : dict[str, dict[str, str]]
                 A dictionary mapping shortforms to inner dictionaries
@@ -155,7 +155,7 @@ class AdeftConstructor:
         pos_labels = [
             label for label in candidate_pos_labels if self.is_pos_label(label)
         ]
-        return AdeftData(grounding_dict, names, pos_labels)
+        return GroundingInfo(grounding_dict, names, pos_labels)
 
     def build_corpus(grounding_dict):
         """Build a corpus for model training based on a grounding dictionary.
@@ -197,7 +197,7 @@ class AdeftConstructor:
         pos_labels = [label for label in names if self.is_pos_label(label)]
         return names, pos_labels
 
-    def get_adeft_data(shortforms):
+    def get_grounding_info(shortforms):
         """Generate candidate grounding info for an adeft model for shortforms.
 
         Parameters
@@ -209,7 +209,7 @@ class AdeftConstructor:
 
         Returns
         -------
-        AdeftData
+        GroundingInfo
             A named tuple containing the following entries
             grounding_dict : dict[str, dict[str, str]]
                 A dictionary mapping shortforms to inner dictionaries
@@ -246,16 +246,19 @@ class AdeftConstructor:
             total_count = sum(grounding_counts.values())
             top_grounding, top_count = max(grounding_counts.items(), key=lambda x: x[1])
             if top_count / total_count < 0.5:
+                # If a cluster has no majority grounding, flag this situation for manual
+                # review.
                 in_cluster_groundings = {
                 longform: f"AMBIGUOUS-{i}-{grounding}"
                     for longform, grounding in zip(longforms, groundings)
                 }
             else:
+                # If there is a majority grounding, keep only longforms with this grounding
+                # and throw out the others.
                 in_cluster_groundings = {
                     longform: grounding
-                    if grounding == "top_grounding"
-                    else f"DISCORDANT-{i}-{grounding}"
                     for longform, grounding in zip(longforms, groundings)
+                    if grounding == top_grounding
                 }
             temp_groundings.update(in_cluster_groundings)
 
@@ -267,7 +270,7 @@ class AdeftConstructor:
         }
 
         names, pos_labels = self.get_names_and_pos_labels(new_grounding_dict)
-        return AdeftData(new_grounding_dict, names, pos_labels)
+        return GroundingInfo(new_grounding_dict, names, pos_labels)
 
 
 class GroundingClusterer:
@@ -368,13 +371,7 @@ class DistantEvalCorpusConstructor:
             *,
             filter_func=None,
     ):
-        """Callable to build corpora for training a distant evaluation models.
-
-
-        get_content_ids_for_gene_or_protein : callable[str, list[str]]
-            A function mapping groundings from HGNC or UP namespace to a list of
-            content ids for 
-        """
+        """Callable to build corpora for training a distant evaluation models. """
         self.get_content_ids_for_gene_or_protein = get_entrez_pmids_for_gene_or_protein
         self.get_content_ids_for_mesh_term = get_pmids_for_mesh_term
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
@@ -456,7 +453,7 @@ def get_existing_grounding_info(shortform, *, path=ADEFT_PATH):
         json_bytes = f.read()
     model_info = json.loads(json_bytes.decode('utf-8'))
     pos_labels = model_info["pos_labels"]
-    return grounding_map, names, pos_labels
+    return GroundingInfo(grounding_map, names, pos_labels)
 
 
 def validate_and_refit_model(
@@ -541,12 +538,12 @@ class AdeftTrainer:
         self.adeft_constructor = adeft_constructor
         self.opaque_constructor = opaque_constructor
 
-    def __call__(self, adeft_data, *, rng=None):
+    def __call__(self, grounding_info, *, rng=None):
         """Train an adeft model and perform direct and distant evaluation
 
-        Paramters
+        Parameters
         ---------
-        adeft_data : `AdeftData`
+        grounding_info : `GroundingInfo`
             ``NamedTuple`` with entries ``grounding_dict``, ``names``, and
             ``pos_labels``.
 

@@ -71,9 +71,12 @@ class AdeftConstructor:
         """
         self.get_content_ids_for_agent_text = get_content_ids_for_agent_text
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
+        self.grounding_func = grounding_func
+        self.get_name = get_name
         self.is_pos_label = is_pos_label
+        self.grounding_clusterer = grounding_clusterer
 
-    def find_longforms(self, shortforms, *, cutoff=2.0):
+    def get_longforms(self, shortforms, *, cutoff=2.0):
         """Identify longform expansions for shortforms
 
         Parameters
@@ -94,6 +97,7 @@ class AdeftConstructor:
             Adeft's scoring algorithm.
         
         """
+        miners = {}
         for shortform in shortforms:
             ids = self.get_content_ids_for_agent_text(shortform)
             content = self.get_plaintexts_for_content_ids(ids, contains=shortforms)
@@ -197,7 +201,7 @@ class AdeftConstructor:
         pos_labels = [label for label in names if self.is_pos_label(label)]
         return names, pos_labels
 
-    def get_grounding_info(shortforms):
+    def get_grounding_info(self, shortforms):
         """Generate candidate grounding info for an adeft model for shortforms.
 
         Parameters
@@ -372,10 +376,10 @@ class DistantEvalCorpusConstructor:
             filter_func=None,
     ):
         """Callable to build corpora for training a distant evaluation models. """
-        self.get_content_ids_for_gene_or_protein = get_entrez_pmids_for_gene_or_protein
-        self.get_content_ids_for_mesh_term = get_pmids_for_mesh_term
+        self.get_content_ids_for_gene_or_protein = get_content_ids_for_gene_or_protein
+        self.get_content_ids_for_mesh_term = get_content_ids_for_mesh_term
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
-        self.get_plaintexts_for_content_ids = get_plaintext_for_content_ids
+        self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
 
     def __call__(grounding, *, exclude_content_ids=None):
         if exclude_content_ids is None:
@@ -536,7 +540,7 @@ class AdeftTrainer:
 
         """
         self.adeft_constructor = adeft_constructor
-        self.opaque_constructor = opaque_constructor
+        self.disteval_constructor = disteval_constructor
 
     def __call__(self, grounding_info, *, rng=None):
         """Train an adeft model and perform direct and distant evaluation
@@ -571,7 +575,7 @@ class AdeftTrainer:
         for grounding in groundings:
             if grounding == "ungrounded":
                 continue
-            cases = opaque_constructor.get_training_cases_for_grounding(grounding)
+            cases = disteval_constructor.get_training_cases_for_grounding(grounding)
             if cases is None:
                 ad_models[grounding] = None
                 continue

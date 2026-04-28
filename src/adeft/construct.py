@@ -1,4 +1,5 @@
 import gzip
+import itertools as it
 import json
 import logging
 import networkx as nx
@@ -8,11 +9,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import NamedTuple
 
+import adeft
+
+from adeft.disambiguate import AdeftDisambiguator
 from adeft.discover import AdeftMiner
 from adeft.locations import ADEFT_PATH
 from adeft.modeling.classify import AdeftClassifier
 from adeft.modeling.label import AdeftLabeler
 from adeft.nlp import english_stopwords
+
+
+logger = logging.getLogger(__file__)
 
 
 class GroundingInfo(NamedTuple):
@@ -44,30 +51,33 @@ class AdeftConstructor:
             a iterable of ids associated to documents containing this
             shortform text. For the models shipped with Adeft, this is
             ``indra_db_lite.api.get_trids_for_agent_text``.
-        get_plaintexts_for_content_ids : callable[[iterable[str], contains=list[str]|None],
+        get_plaintexts_for_content_ids : callable[[iterable[str],
+                                                   contains=list[str]|None],
                                                   map[str, str]]
-            A function with signature f(ids, contains=None) which given an iterable
-            of content ids and an optional contains arg, returns a mapping, which
-            maps ids to plaintext documents associated to them, optionally filtered
-            to only include paragraphs that include one or more of the strings in
-            the contains list, if one has been passed.
+            A function with signature f(ids, contains=None) which given an
+            iterable of content ids and an optional contains arg, returns a
+            mapping, which maps ids to plaintext documents associated to them,
+            optionally filtered to only include paragraphs that include one or
+            more of the strings in the contains list, if one has been passed.
         grounding_func : callable[str, str]
             A function which given a longform expansion returns an associated
-            grounding string, containing a namespace and an identifier separated
-            by ":" (e.g. "HGNC:6091", "GO:GO:0072593"), or if no grounding can be
-            found for the input longform, returns "ungrounded".
+            grounding string, containing a namespace and an identifier
+            separated by ":" (e.g. "HGNC:6091", "GO:GO:0072593"), or if no
+            grounding can be found for the input longform, returns
+            "ungrounded".
         get_name : callable[str, str]
             A function that gets the standard name associated to a grounding.
         is_pos_label : callable[str, bool]
-           A function which returns true if the input grounding string (of the kind
-           produced by ``grounding_func``) should be considered as a positive label.
-           The intention is that statements with an agent correctly grounded to
-           a negative label should be filtered out entirely in downstream tasks, e.g.
-           for disambiguating for INDRA, positive labels correspond to groundings which
-           are of interest within INDRA statements.
+           A function which returns true if the input grounding string (of the
+           kind produced by ``grounding_func``) should be considered as a
+           positive label.  The intention is that statements with an agent
+           correctly grounded to a negative label should be filtered out
+           entirely in downstream tasks, e.g.  for disambiguating for INDRA,
+           positive labels correspond to groundings which are of interest
+           within INDRA statements.
         grounding_clusterer : `adeft.construct.GroundingClusterer`
             An instantiated `GroundingClusterer` object.
-        
+
         """
         self.get_content_ids_for_agent_text = get_content_ids_for_agent_text
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
@@ -95,12 +105,14 @@ class AdeftConstructor:
             number of times this longform expansion appeared in the generated
             text corpus, and the score assigned to this longform expansion by
             Adeft's scoring algorithm.
-        
+
         """
         miners = {}
         for shortform in shortforms:
             ids = self.get_content_ids_for_agent_text(shortform)
-            content = self.get_plaintexts_for_content_ids(ids, contains=shortforms)
+            content = self.get_plaintexts_for_content_ids(
+                ids, contains=shortforms
+            )
             miners[shortform] = AdeftMiner(shortform)
             miners[shortform].process_texts(content.values())
             del content
@@ -109,12 +121,13 @@ class AdeftConstructor:
         for shortform in shortforms:
             longforms = miners[shortform].get_longforms()
             longforms = [
-                (longform, count, score) for longform, count, score in longforms
+                (longform, count, score)
+                for longform, count, score in longforms
                 if count*score > cutoff
-                # if the longform is not longer than the shortform, filter it out.
-                # We are unlikely to have disambiguated anything. (This usually
-                # happens if Adeft has failed to accurately detect the correct
-                # expansion).
+                # if the longform is not longer than the shortform, filter
+                # it out. We are unlikely to have disambiguated anything.
+                # (This usually happens if Adeft has failed to accurately
+                # detect the correct expansion).
                 and len(longform) > len(shortform)
             ]
             longforms_dict[shortform] = longforms
@@ -138,21 +151,23 @@ class AdeftConstructor:
                 `self.grounding_func`. 
             names : dict[str, str]
                 A dictionary mapping groundings of the form ``f{db}:{id}`` to
-                canonical names. Adeft keeps track of these names to make manual
-                spot checking easier.
+                canonical names. Adeft keeps track of these names to make
+                manual spot checking easier.
             pos_labels : list[str]
-                A list of groundings corresponding to positive labels.
-                The intention is that statements with agents grounded to anything
+                A list of groundings corresponding to positive labels.  The
+                intention is that statements with agents grounded to anything
                 which isn't a positive label should be filtered out entirely in
-                downstream tasks, e.g. for disambiguating for INDRA, positive labels
-                correspond to groundings which are of interest within INDRA statements.
+                downstream tasks, e.g. for disambiguating for INDRA, positive
+                labels correspond to groundings which are of interest within
+                INDRA statements.
 
         """
         grounding_dict = {}
         names = {}
         for shortform, longforms in longforms_dict.items():
             grounding_map = {
-                longform: self.grounding_func(longform) for longform, *_ in longforms
+                longform: self.grounding_func(longform)
+                for longform, *_ in longforms
             }
             grounding_dict[shortform] = grounding_map
         candidate_pos_labels = list(names.keys())
@@ -161,20 +176,21 @@ class AdeftConstructor:
         ]
         return GroundingInfo(grounding_dict, names, pos_labels)
 
-    def build_corpus(grounding_dict):
+    def build_corpus(self, grounding_dict):
         """Build a corpus for model training based on a grounding dictionary.
 
         Parameters
         ----------
         grounding_dict : dict[str, dict[str, str]]
-            A grounding dictionary in the form created by ``self.ground_longforms``.
+            A grounding dictionary in the form created by
+           ``self.ground_longforms``.
 
         Returns
         -------
         corpus : list[tuple[str, str, str]]
-            A list of tuples. Each tuple contains three elements, a text document,
-            an associated label for the text document, and an id associated to the
-            document.
+            A list of tuples. Each tuple contains three elements, a text
+            document, an associated label for the text document, and an id
+            associated to the document.
         """
         shortforms = list(grounding_dict.keys())
         labeler = AdeftLabeler(grounding_dict)
@@ -182,9 +198,11 @@ class AdeftConstructor:
         seen_ids = set()
         for shortform in grounding_dict.keys():
             ids = self.get_content_ids_for_agent_text(shortform)
-            ids = set(ids) - seen_trids
+            ids = set(ids) - seen_ids
             seen_ids.update(ids)
-            content = self.get_plaintexts_for_content_ids(ids, contains=shortforms)
+            content = self.get_plaintexts_for_content_ids(
+                ids, contains=shortforms
+            )
             corpus.extend(
                 labeler.build_from_texts(
                     (text, id_) for id_, text in content.items()
@@ -221,44 +239,57 @@ class AdeftConstructor:
                 `self.grounding_func`. 
             names : dict[str, str]
                 A dictionary mapping groundings of the form ``f{db}:{id}`` to
-                canonical names. Adeft keeps track of these names to make manual
-                spot checking easier.
+                canonical names. Adeft keeps track of these names to make
+                manual spot checking easier.
             pos_labels : list[str]
-                A list of groundings corresponding to positive labels.
-                The intention is that statements with agents grounded to anything
+                A list of groundings corresponding to positive labels.  The
+                intention is that statements with agents grounded to anything
                 which isn't a positive label should be filtered out entirely in
-                downstream tasks, e.g. for disambiguating for INDRA, positive labels
-                correspond to groundings which are of interest within INDRA statements.
+                downstream tasks, e.g. for disambiguating for INDRA, positive
+                labels correspond to groundings which are of interest within
+                INDRA statements.
 
         """
         longforms = self.get_longforms(shortforms)
         longform_counts = {
-            lf: count for lf_list in longforms.values() for lf, count, _ in lf_list
+            lf: count for lf_list in longforms.values()
+            for lf, count, _ in lf_list
         }
         grounding_dict, _, _ = self.ground_longforms(longforms)
         clusters = self.grounding_clusterer.semantic_clusters(grounding_dict)
         temp_groundings = {}
         names = {}
         for i, (longforms, groundings) in enumerate(clusters):
-            new_groundings = self.grounding_clusterer.group_groundings(groundings)
+            new_groundings = self.grounding_clusterer.group_groundings(
+                groundings
+            )
             groundings = [
-                new_groundings.get(grounding, grounding) for grounding in groundings
+                new_groundings.get(grounding, grounding)
+                for grounding in groundings
             ]
             grounding_counts = defaultdict(int)
             for longform, grounding in zip(longforms, groundings):
                 grounding_counts[grounding] += longform_counts[longform]
             total_count = sum(grounding_counts.values())
-            top_grounding, top_count = max(grounding_counts.items(), key=lambda x: x[1])
-            if top_count / total_count < 0.5:
-                # If a cluster has no majority grounding, flag this situation for manual
-                # review.
+            top_grounding, top_count = max(
+                grounding_counts.items(), key=lambda x: x[1]
+            )
+            if (
+                    top_count / total_count < 0.5
+                    or top_count < 10 and top_count + total_count >= 10
+            ):
+                # If a cluster has no majority grounding, or if there are not
+                # enough training texts just including the majority grounding
+                # to train an adeft model but there could be enough training
+                # texts if all longforms in the cluster were are considered,
+                # flag this situation for manual review.
                 in_cluster_groundings = {
-                longform: f"AMBIGUOUS-{i}-{grounding}"
+                    longform: f"AMBIGUOUS-{i}-{grounding}"
                     for longform, grounding in zip(longforms, groundings)
                 }
             else:
-                # If there is a majority grounding, keep only longforms with this grounding
-                # and throw out the others.
+                # If there is a majority grounding, keep only longforms with
+                # this grounding and throw out the others.
                 in_cluster_groundings = {
                     longform: grounding
                     for longform, grounding in zip(longforms, groundings)
@@ -276,6 +307,20 @@ class AdeftConstructor:
         names, pos_labels = self.get_names_and_pos_labels(new_grounding_dict)
         return GroundingInfo(new_grounding_dict, names, pos_labels)
 
+    def train_model(self, grounding_info, *, rng=None, min_class_size=10):
+        grounding_dict, names, pos_labels = grounding_info
+        shortforms = list(sorted(grounding_dict.keys()))
+        corpus = self.build_corpus(grounding_dict)
+        adeft_model = validate_and_refit_model(
+            shortforms, corpus, pos_labels, random_state=rng,
+            min_class_size=min_class_size
+        )
+        if adeft_model is None:
+            raise RuntimeError(
+                f"Insufficient data to train model for {shortforms}"
+            )
+        return AdeftDisambiguator(adeft_model, grounding_dict, names)
+
 
 class GroundingClusterer:
     def __init__(self, text_similarity_func, nearest_common_ancestor_func):
@@ -288,7 +333,8 @@ class GroundingClusterer:
         Parameters
         ----------
         groundings : list[str]
-            List of grounding strings, namespace and identifier separated by ":".
+            List of grounding strings, namespace and identifier separated by
+            ":".
 
         Returns
         -------
@@ -298,22 +344,24 @@ class GroundingClusterer:
         """
         groundings = list(set(g for g in groundings if g != "ungrounded"))
         G = nx.Graph()
-        N = len(groundings)
         G.add_nodes_from(groundings)
         edges = []
-        for g1, g2 in combinations(groundings, 2):
+        for g1, g2 in it.combinations(groundings, 2):
             if self.nearest_common_ancestor(g1, g2) is not None:
                 edges.append((g1, g2))
         G.add_edges_from(edges)
 
         result = {}
+        common_ancestor = None
         for component in nx.connected_components(G):
-            common_ancstor = None
+            common_ancestor = None
             for g in component:
                 if common_ancestor is None:
                     common_ancestor = g
                 else:
-                    common_ancestor = self._nearest_common_ancestor(g, common_ancestor)
+                    common_ancestor = self._nearest_common_ancestor(
+                        g, common_ancestor
+                    )
             result[common_ancestor] = component
         result = {g: key for key, val in result.items() for g in val}
         return result
@@ -354,11 +402,13 @@ class GroundingClusterer:
             grounding_idx[grounding].append(i)
 
         for indices in grounding_idx.values():
-            G.add_edges_from(combinations(indices, 2))
+            G.add_edges_from(it.combinations(indices, 2))
 
         longforms = np.asarray(longforms)
         groundings = np.asarray(groundings)
-        components = [list(component) for component in nx.connected_components(G)]
+        components = [
+            list(component) for component in nx.connected_components(G)
+        ]
         return [
             (longforms[list(component)], groundings[list(component)])
             for component in nx.connected_components(G)
@@ -375,13 +425,15 @@ class DistantEvalCorpusConstructor:
             *,
             filter_func=None,
     ):
-        """Callable to build corpora for training a distant evaluation models. """
-        self.get_content_ids_for_gene_or_protein = get_content_ids_for_gene_or_protein
+        """Callable to build corpora for training distant evaluation models."""
+        self.get_content_ids_for_gene_or_protein = (
+            get_content_ids_for_gene_or_protein
+        )
         self.get_content_ids_for_mesh_term = get_content_ids_for_mesh_term
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
 
-    def __call__(grounding, *, exclude_content_ids=None):
+    def __call__(self, grounding, *, exclude_content_ids=None):
         if exclude_content_ids is None:
             exclude_content_ids = set()
         exclude_content_ids = set(exclude_content_ids)
@@ -391,7 +443,9 @@ class DistantEvalCorpusConstructor:
         mesh_terms = None
         namespace, identifier = grounding.split(":", maxsplit=1)
         if namespace in ["HGNC", "UP"]:
-            entrez_ids.update(self.get_content_ids_for_gene_or_protein(grounding))
+            entrez_ids.update(
+                self.get_content_ids_for_gene_or_protein(grounding)
+            )
 
         if namespace == 'MESH':
             mesh_terms = [identifier]
@@ -403,6 +457,8 @@ class DistantEvalCorpusConstructor:
                 mesh_ids.update(
                     self.get_content_ids_for_mesh_term(mesh_id)
                 )
+        # If there is an overlap between meshand entrez texts, arbitrarily
+        # assign to entrez for feature value.
         mesh_ids = mesh_ids - entrez_ids - exclude_content_ids
         entrez_ids -= exclude_content_ids
         all_ids = list(mesh_ids | entrez_ids)
@@ -486,7 +542,8 @@ def validate_and_refit_model(
            The intention is that statements with agents grounded to anything
            which isn't a positive label should be filtered out entirely in
            downstream tasks, e.g. for disambiguating for INDRA, positive labels
-           correspond to groundings which are of interest within INDRA statements.
+           correspond to groundings which are of interest within INDRA
+           statements.
 
     """
     if parameters is None:
@@ -558,16 +615,18 @@ class AdeftTrainer:
         """
         from opaque.train import train_anomaly_detector
         from opaque.nlp.models import GroundingAnomalyDetector
-        from opaque.stats import sample_estimated_metrics
-        from opaque.stats.stats import _hdi_from_sample
-            
-        grounding_dict, names, pos_labels = adeft_data
-        corpus = constructor.build_corpus(grounding_dict)
+        from opaque.stats.stats import highest_density_interval
+
+        grounding_dict, names, pos_labels = grounding_info
+        shortforms = list(grounding_dict.keys())
+        corpus = self.adeft_constructor.build_corpus(grounding_dict)
         adeft_model = validate_and_refit_model(
             shortforms, corpus, pos_labels, random_state=rng, min_class_size=10
         )
         if adeft_model is None:
-            raise RuntimeError(f"Insufficient data to train model for {shortforms}")
+            raise RuntimeError(
+                f"Insufficient data to train model for {shortforms}"
+            )
         disamb = AdeftDisambiguator(adeft_model, grounding_dict, names)
         ad_models = {}
         groundings = [grounding for _, grounding_map in grounding_dict.items()
@@ -575,7 +634,9 @@ class AdeftTrainer:
         for grounding in groundings:
             if grounding == "ungrounded":
                 continue
-            cases = disteval_constructor.get_training_cases_for_grounding(grounding)
+            cases = self.disteval_constructor.get_training_cases_for_grounding(
+                grounding
+            )
             if cases is None:
                 ad_models[grounding] = None
                 continue
@@ -598,10 +659,15 @@ class AdeftTrainer:
             cases = None
         ids = set()
         for shortform in shortforms:
-            ids.update(constructor.get_content_ids_for_agent_text(shortform))
+            ids.update(
+                self.adeft_constructor.get_content_ids_for_agent_text(shortform)
+            )
+
         ids = list(ids)
         texts = list(
-            constructor.get_plaintexts_for_content_ids(trids, contains=shortforms)
+            self.adeft_constructor.get_plaintexts_for_content_ids(
+                ids, contains=shortforms
+            )
         )
         disambiguations = disamb.disambiguate(texts)
 
@@ -617,38 +683,46 @@ class AdeftTrainer:
                 dp_idx_dict[grounding].append(i)
             else:
                 no_dp_idx_dict[grounding].append(i)
-        intervals = {}
+
+        training_label_intervals = {}
+        all_data_intervals = {}
         frequencies = {}
         for grounding, model_info in ad_models.items():
             if model_info is None:
-                intervals[grounding] = None
-                frequencies[grounding] = None
                 continue
             shape_params = model_info["shape_params"]
-            sens_a, sens_b = shape_params["sens_alpha"], shape_params["sens_beta"]
-            spec_a, spec_b = shape_params["spec_alpha"], shape_params["spec_beta"]
-            model = GroundingAnomalyDetector.load_model_info(model_info["model"])
-            idx = no_dp_idx_dict[grounding]
-            with_dp_idx = dp_idx_dict[grounding]
+            sens_a = shape_params["sens_alpha"]
+            sens_b = shape_params["sens_beta"]
+            spec_a = shape_params["spec_alpha"]
+            spec_b = shape_params["spec_beta"]
+            model = GroundingAnomalyDetector.load_model_info(
+                model_info["model"]
+            )
+
+            idx = dp_idx_dict[grounding]
             preds = model.predict([texts[i] for i in idx])
-            mask = np.ones(len(texts), dtype=bool)
-            mask[idx] = False
-            mask[with_dp_idx] = False
-            out_preds = model.predict([texts[i] for i, cond in enumerate(mask) if cond])
             n = len(preds)
             t = np.sum(preds == -1.0)
-            m = len(out_preds)
-            u = np.sum(out_preds == -1.0)
-            frequencies[grounding] = [n, int(t), m, int(u)]
-            metrics = sample_estimated_metrics(
-                n, t, m, u, sens_a, sens_b, spec_a, spec_b, n_samples=10000, rng=1729
+            interval = highest_density_interval(
+                n, t, sens_a, sens_b, spec_a, spec_b, rng=1729
             )
-            met = metrics["standard"]
-            precision_interval = _hdi_from_sample(met.precision, alpha=0.9)
-            recall_interval = _hdi_from_sample(met.recall, alpha=0.9)
-            intervals[grounding] = {"precision": precision_interval, "recall": recall_interval}
+            interval = (1.0 - interval[1], 1.0-interval[0])
+            training_label_intervals[grounding] = interval
+
+            idx = no_dp_idx_dict[grounding]
+            preds = model.predict([texts[i] for i in idx])
+            m = len(preds)
+            u = np.sum(preds == -1.0)
+            interval = highest_density_interval(
+                n + m, t + u, sens_a, sens_b, spec_a, spec_b, rng=1729
+            )
+            interval = (1.0 - interval[1], 1.0-interval[0])
+            all_data_intervals[grounding] = interval
+            frequencies[grounding] = [n, t, m, u]
+
         return {
-            "intervals": intervals,
+            "training_label_intervals": training_label_intervals,
+            "all_data_intervals": all_data_intervals,
             "ad_models": ad_models,
             "frequencies": frequencies,
             "grounding_dict": grounding_dict,

@@ -420,6 +420,7 @@ class DistantEvalCorpusConstructor:
             get_content_ids_for_mesh_term,
             get_mesh_terms_for_grounding,
             get_plaintexts_for_content_ids,
+            get_counts_for_grounding,
             *,
             filter_func=None,
     ):
@@ -430,6 +431,7 @@ class DistantEvalCorpusConstructor:
         self.get_content_ids_for_mesh_term = get_content_ids_for_mesh_term
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
+        self.get_counts_for_grounding = get_counts_for_grounding
         self.filter_func = filter_func
 
     def __call__(self, grounding, *, exclude_content_ids=None):
@@ -456,7 +458,7 @@ class DistantEvalCorpusConstructor:
                 mesh_ids.update(
                     self.get_content_ids_for_mesh_term(mesh_id)
                 )
-        # If there is an overlap between meshand entrez texts, arbitrarily
+        # If there is an overlap between mesh and entrez texts, arbitrarily
         # assign to entrez for feature value.
         mesh_ids = mesh_ids - entrez_ids - exclude_content_ids
         entrez_ids -= exclude_content_ids
@@ -474,10 +476,13 @@ class DistantEvalCorpusConstructor:
             return None
         train_ids, train_texts = zip(*train_data)
         train_data = None
+        db_count, reader_count = self.get_counts_for_grounding(grounding)
         return {
             "mesh_terms": mesh_terms,
             "num_entrez": len(entrez_ids),
             "num_mesh": len(mesh_ids),
+            "db_count": db_count,
+            "reader_count": reader_count,
             "train_ids": train_ids,
             "train_texts": train_texts,
         }
@@ -629,6 +634,8 @@ class AdeftTrainer:
                     curie,
                     train_info["mesh_terms"],
                     train_info["num_entrez"],
+                    train_info["db_count"],
+                    train_info["reader_count"],
                     train_info["train_trids"],
                     test_data,
                 )

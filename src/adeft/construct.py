@@ -17,6 +17,7 @@ from adeft.locations import ADEFT_PATH
 from adeft.modeling.classify import AdeftClassifier
 from adeft.modeling.label import AdeftLabeler
 from adeft.nlp import english_stopwords
+from adeft.util import get_canonical_model_name
 
 
 logger = logging.getLogger(__file__)
@@ -176,7 +177,7 @@ class AdeftConstructor:
         ]
         return GroundingInfo(grounding_dict, names, pos_labels)
 
-    def build_corpus(self, grounding_dict):
+    def build_corpus(self, grounding_dict, *, text_types=None):
         """Build a corpus for model training based on a grounding dictionary.
 
         Parameters
@@ -201,7 +202,7 @@ class AdeftConstructor:
             ids = set(ids) - seen_ids
             seen_ids.update(ids)
             content = self.get_plaintexts_for_content_ids(
-                ids, contains=shortforms
+                ids, contains=shortforms, text_types=text_types
             )
             corpus.extend(
                 labeler.build_from_texts(
@@ -596,6 +597,43 @@ class AdeftTrainer:
         """
         self.adeft_constructor = adeft_constructor
         self.disteval_constructor = disteval_constructor
+
+    def get_opaque_test_cases_from_adeft_model(self, disamb):
+        """Get test cases for training diagnostic test prior model."""
+        corpus = self.adeft_constructor.build_corpus(
+            disamb.grounding_dict, text_types=["fulltext", "abstract"],
+        )
+        test_data = {
+            id_: label for text, label, id_ in corpus
+            if self.disteval_constructor.filter_func(text)
+        }
+        groundings = set(
+            curie for grounding_map in disamb.grounding_dict.values()
+            for curie in grounding_map.values()
+        )
+        result = []
+        for curie in groundings:
+            if ":" not in curie:
+                continue
+            if list(test_data.values()).count(curie) < 5:
+                continue
+            train_info = self.disteval_constructor(
+                curie, exclude_content_ids=set(test_data)
+            )
+            if train_info is None:
+                continue
+            result.append(
+                (
+                    get_canonical_model_name(disamb.shortforms),
+                    tuple(disamb.shortforms),
+                    curie,
+                    train_info["mesh_terms"],
+                    train_info["num_entrez"],
+                    train_info["train_trids"],
+                    test_data,
+                )
+            )
+        return result
 
     def __call__(self, grounding_info, *, rng=None):
         """Train an adeft model and perform direct and distant evaluation

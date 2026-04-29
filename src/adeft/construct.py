@@ -406,9 +406,6 @@ class GroundingClusterer:
 
         longforms = np.asarray(longforms)
         groundings = np.asarray(groundings)
-        components = [
-            list(component) for component in nx.connected_components(G)
-        ]
         return [
             (longforms[list(component)], groundings[list(component)])
             for component in nx.connected_components(G)
@@ -432,6 +429,7 @@ class DistantEvalCorpusConstructor:
         self.get_content_ids_for_mesh_term = get_content_ids_for_mesh_term
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
+        self.filter_func = filter_func
 
     def __call__(self, grounding, *, exclude_content_ids=None):
         if exclude_content_ids is None:
@@ -480,7 +478,7 @@ class DistantEvalCorpusConstructor:
             "num_entrez": len(entrez_ids),
             "num_mesh": len(mesh_ids),
             "train_ids": train_ids,
-            "train_data": train_data,
+            "train_texts": train_texts,
         }
 
 
@@ -660,7 +658,9 @@ class AdeftTrainer:
         ids = set()
         for shortform in shortforms:
             ids.update(
-                self.adeft_constructor.get_content_ids_for_agent_text(shortform)
+                self.adeft_constructor.get_content_ids_for_agent_text(
+                    shortform
+                )
             )
 
         ids = list(ids)

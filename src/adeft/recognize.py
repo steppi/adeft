@@ -141,6 +141,10 @@ class BaseRecognizer(object):
         return text
 
 
+def _token_map(x):
+    return stem(x).lower()
+
+
 class AdeftRecognizer(BaseRecognizer):
     """Class for recognizing longforms by searching for defining patterns (DP)
 
@@ -169,7 +173,7 @@ class AdeftRecognizer(BaseRecognizer):
     def __init__(self, shortform, grounding_map, window=100):
         self.grounding_map = grounding_map
         self.search_trie = SearchTrie(grounding_map,
-                                      token_map=lambda x: stem(x).lower())
+                                      token_map=_token_map)
         super().__init__(shortform, window)
 
     def _search(self, tokens):

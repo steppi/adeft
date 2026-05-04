@@ -38,6 +38,8 @@ class AdeftConstructor:
             get_name,
             is_pos_label,
             grounding_clusterer,
+            *,
+            filter_func=None,
     ):
         """Helper for constructing Adeft Models.
 
@@ -86,6 +88,12 @@ class AdeftConstructor:
         self.get_name = get_name
         self.is_pos_label = is_pos_label
         self.grounding_clusterer = grounding_clusterer
+
+        if filter_func is None:
+            def filter_func(text):
+                return True
+
+        self.filter_func = filter_func
 
     def get_longforms(self, shortforms, *, cutoff=2.0):
         """Identify longform expansions for shortforms
@@ -207,6 +215,7 @@ class AdeftConstructor:
             corpus.extend(
                 labeler.build_from_texts(
                     (text, id_) for id_, text in content.items()
+                    if self.filter_func(text)
                 )
             )
         return corpus
@@ -432,6 +441,11 @@ class DistantEvalCorpusConstructor:
         self.get_mesh_terms_for_grounding = get_mesh_terms_for_grounding
         self.get_plaintexts_for_content_ids = get_plaintexts_for_content_ids
         self.get_counts_for_grounding = get_counts_for_grounding
+
+        if filter_func is None:
+            def filter_func(text):
+                return True
+
         self.filter_func = filter_func
 
     def __call__(self, grounding, *, exclude_content_ids=None):

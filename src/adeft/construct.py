@@ -467,14 +467,13 @@ class DistantEvalCorpusConstructor:
         train_data = self.get_plaintexts_for_content_ids(
             all_ids, text_types=['fulltext', 'abstract']
         )
-        train_data = [
-            (id_, text) for id_, text in train_data.items()
+        train_ids = [
+            id_ for id_, text in train_data.items()
             if self.filter_func(text)
         ]
-        if len(train_data) < 5:
+        if len(train_ids) < 5:
             return None
-        train_ids, train_texts = zip(*train_data)
-        train_data = None
+
         db_count, reader_count = self.get_counts_for_grounding(grounding)
         return {
             "mesh_terms": mesh_terms,
@@ -483,7 +482,6 @@ class DistantEvalCorpusConstructor:
             "db_count": db_count,
             "reader_count": reader_count,
             "train_ids": train_ids,
-            "train_texts": train_texts,
         }
 
 
@@ -627,6 +625,7 @@ class AdeftTrainer:
             )
             if train_info is None:
                 continue
+
             training_info[curie] = train_info
 
         return {

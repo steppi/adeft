@@ -615,7 +615,8 @@ class AdeftTrainer:
             curie for grounding_map in disamb.grounding_dict.values()
             for curie in grounding_map.values()
         )
-        result = []
+
+        training_info = {}
         for curie in groundings:
             if ":" not in curie:
                 continue
@@ -626,20 +627,14 @@ class AdeftTrainer:
             )
             if train_info is None:
                 continue
-            result.append(
-                (
-                    get_canonical_model_name(disamb.shortforms),
-                    tuple(disamb.shortforms),
-                    curie,
-                    train_info["mesh_terms"],
-                    train_info["num_entrez"],
-                    train_info["db_count"],
-                    train_info["reader_count"],
-                    train_info["train_ids"],
-                    test_data,
-                )
-            )
-        return result
+            training_info[curie] = train_info
+
+        return {
+            "model_name": get_canonical_model_name(disamb.shortforms),
+            "shortforms": disamb.shortforms,
+            "training_info": training_info,
+            "test_data": test_data,
+        }
 
     def __call__(self, grounding_info, *, rng=None):
         """Train an adeft model and perform direct and distant evaluation

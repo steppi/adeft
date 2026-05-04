@@ -650,7 +650,7 @@ class AdeftTrainer:
                     train_info["num_entrez"],
                     train_info["db_count"],
                     train_info["reader_count"],
-                    train_info["train_trids"],
+                    train_info["train_ids"],
                     test_data,
                 )
             )

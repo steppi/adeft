@@ -453,25 +453,9 @@ class DistantEvalCorpusConstructor:
             exclude_content_ids = set()
         exclude_content_ids = set(exclude_content_ids)
 
-        entrez_ids = set()
-        mesh_ids = set()
-        mesh_terms = None
-        namespace, identifier = grounding.split(":", maxsplit=1)
-        if namespace in ["HGNC", "UP"]:
-            entrez_ids.update(
-                self.get_content_ids_for_gene_or_protein(grounding)
-            )
+        entrez_ids = self.get_content_ids_for_gene_or_protein(grounding)
+        mesh_ids, mesh_terms = self.get_content_ids_for_mesh_term(grounding)
 
-        if namespace == 'MESH':
-            mesh_terms = [identifier]
-        else:
-            mesh_terms = self.get_mesh_terms_for_grounding(grounding)
-
-        if mesh_terms:
-            for mesh_id in mesh_terms:
-                mesh_ids.update(
-                    self.get_content_ids_for_mesh_term(mesh_id)
-                )
         # If there is an overlap between mesh and entrez texts, arbitrarily
         # assign to entrez for feature value.
         mesh_ids = mesh_ids - entrez_ids - exclude_content_ids

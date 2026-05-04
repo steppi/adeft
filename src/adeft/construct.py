@@ -453,8 +453,9 @@ class DistantEvalCorpusConstructor:
             exclude_content_ids = set()
         exclude_content_ids = set(exclude_content_ids)
 
-        entrez_ids = self.get_content_ids_for_gene_or_protein(grounding)
+        entrez_ids = set(self.get_content_ids_for_gene_or_protein(grounding))
         mesh_ids, mesh_terms = self.get_content_ids_for_mesh_term(grounding)
+        mesh_ids = set(mesh_ids)
 
         # If there is an overlap between mesh and entrez texts, arbitrarily
         # assign to entrez for feature value.

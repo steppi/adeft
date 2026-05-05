@@ -4,6 +4,7 @@ import json
 import logging
 import networkx as nx
 import numpy as np
+import random
 
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -448,13 +449,22 @@ class DistantEvalCorpusConstructor:
 
         self.filter_func = filter_func
 
-    def __call__(self, grounding, *, exclude_content_ids=None):
+    def __call__(
+            self, grounding, *, exclude_content_ids=None, max_mesh_ids=100000,
+            rng=None,
+    ):
+        if rng is None:
+            rng = random.Random()
+
         if exclude_content_ids is None:
             exclude_content_ids = set()
         exclude_content_ids = set(exclude_content_ids)
 
         entrez_ids = set(self.get_content_ids_for_gene_or_protein(grounding))
         mesh_ids, mesh_terms = self.get_content_ids_for_mesh_term(grounding)
+        if max_mesh_ids is not None and len(mesh_ids) > max_mesh_ids:
+            mesh_ids = rng.sample(mesh_ids, k=max_mesh_ids)
+
         mesh_ids = set(mesh_ids)
 
         # If there is an overlap between mesh and entrez texts, arbitrarily
@@ -464,6 +474,7 @@ class DistantEvalCorpusConstructor:
         all_ids = list(mesh_ids | entrez_ids)
         if not all_ids:
             return None
+
         train_data = self.get_plaintexts_for_content_ids(
             all_ids, text_types=['fulltext', 'abstract']
         )
@@ -605,17 +616,19 @@ class AdeftTrainer:
         corpus = self.adeft_constructor.build_corpus(
             disamb.grounding_dict, text_types=["fulltext", "abstract"],
         )
+
         test_data = {
             id_: label for text, label, id_ in corpus
             if self.disteval_constructor.filter_func(text)
         }
+
         groundings = set(
             curie for grounding_map in disamb.grounding_dict.values()
             for curie in grounding_map.values()
         )
 
         training_info = {}
-        for curie in groundings:
+        for i, curie in enumerate(groundings):
             if ":" not in curie:
                 continue
             if list(test_data.values()).count(curie) < 5:
